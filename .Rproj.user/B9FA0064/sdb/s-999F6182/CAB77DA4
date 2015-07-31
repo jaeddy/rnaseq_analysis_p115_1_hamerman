@@ -1,0 +1,18 @@
+{
+    "contents" : "library(dplyr)\nlibrary(readr)\nlibrary(stringr)\nlibrary(biomaRt)\n\n# Specify flowcell & project\nfcDir <- \"/Volumes/genomics/Illumina/150707_D00565_0090_AHMMF2ADXX\"\nprocessedDir <- \"Project_P115-1Processed\"\n\n# Get file path for counts file\ncountsDir <- file.path(fcDir, processedDir, \"counts\")\n\ncountsFile <- list.files(countsDir) %>% \n    str_extract(\".*combined_counts.csv\") %>% \n    na.omit() %>% \n    file.path(countsDir, .)\n\n# Read in combined counts file\ncounts <- read_csv(countsFile)\n\n# Get Entrez Gene IDs corresponding to Ensembl Gene IDs\nmart <- useMart(biomart = \"ensembl\", dataset = \"mmusculus_gene_ensembl\")\nens2Gene <- getBM(attributes = c(\"ensembl_gene_id\", \"mgi_symbol\"), \n                  filters = \"ensembl_gene_id\", \n                  values = counts$geneName, mart = mart)\nens2Gene = ens2Gene[match(counts$geneName, ens2Gene$ensembl_gene_id), ]\n\n# Insert Entrez Gene IDs for genes in counts data\ncountsMgi <- counts %>% \n    mutate(mgiSymbol = ens2Gene$mgi_symbol)\ncolOrder <- c(names(countsMgi)[1], names(countsMgi)[length(countsMgi)],\n              names(countsMgi)[2:(length(countsMgi)-1)])\ncountsMgi <- countsMgi %>% \n    dplyr::select(one_of(colOrder)) %>% \n    mutate(mgiSymbol = ifelse(is.na(mgiSymbol), \"NA\", mgiSymbol))\n\n# Write the new file\ncountsFileNew <- str_replace(countsFile, \".csv\", \"_wMgiSymbol.csv\")\nwrite_csv(countsMgi, countsFileNew)\n",
+    "created" : 1437506558472.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "1703837937",
+    "id" : "CAB77DA4",
+    "lastKnownWriteTime" : 1437692654,
+    "path" : "~/code/github/analyses/rnaseq_analysis_p115_1_hamerman/R/format_count_data.R",
+    "project_path" : "R/format_count_data.R",
+    "properties" : {
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "type" : "r_source"
+}

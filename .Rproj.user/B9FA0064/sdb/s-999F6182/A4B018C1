@@ -1,0 +1,25 @@
+{
+    "contents" : "",
+    "created" : 1437692130162.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "A4B018C1",
+    "lastKnownWriteTime" : 1437509233,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "npm27orf4j",
+        "caption" : "countsMgi",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=countsMgi&cache_key=npm27orf4j",
+        "displayedObservations" : 37991,
+        "environment" : "",
+        "object" : "countsMgi",
+        "totalObservations" : 37991,
+        "variables" : 18
+    },
+    "relative_order" : 7,
+    "source_on_save" : false,
+    "type" : "r_dataframe"
+}

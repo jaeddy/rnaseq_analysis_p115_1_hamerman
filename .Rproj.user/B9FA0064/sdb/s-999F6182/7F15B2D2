@@ -1,0 +1,25 @@
+{
+    "contents" : "",
+    "created" : 1437508084216.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "7F15B2D2",
+    "lastKnownWriteTime" : 4506824072,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "0nf3e1iq3n",
+        "caption" : "ens2Gene",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=ens2Gene&cache_key=0nf3e1iq3n",
+        "displayedObservations" : "37991",
+        "environment" : "",
+        "object" : "ens2Gene",
+        "totalObservations" : "37991",
+        "variables" : "2"
+    },
+    "relative_order" : 4,
+    "source_on_save" : false,
+    "type" : "r_dataframe"
+}
