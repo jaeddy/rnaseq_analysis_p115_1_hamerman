@@ -1,0 +1,105 @@
+---
+title: "P115-1 Analysis"
+author: "James Eddy"
+date: "July 31, 2015"
+output: html_document
+---
+
+```{r global_opts}
+knitr::opts_chunk$set(fig.width=8, fig.height=4, fig.align='center',
+                      echo=TRUE, warning=FALSE, message=FALSE)
+```
+
+### Set up R environment
+
+#### Set working directory
+
+This is a small step that lets me switch between executing chunks interactively
+and knitting the entire Rmd document without having to constantly modify file
+paths. 
+
+I need to test whether this does anything funky with how knitr saves files for
+the final HTML document...
+
+```{r set_directory}
+# Switch to the top level directory for the project
+setwd("..")
+```
+
+#### Load packages
+
+First, load required packages for data munging, visualization, and analysis
+(these are largely Hadley Wickham libraries, plus some Bioconductor tools).
+
+```{r load_packages}
+# Load my go-to libraries
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(readxl)
+
+# ..plus some others I'll need here
+library(edgeR)
+library(limma)
+```
+
+#### Define functions
+
+These are functions written by Elizabeth Whalen (shared by Michael Mason) that
+might come in handy with some steps of the analysis. I might rewrite these at
+some point to better match my own coding style and/or needs. I'll also likely
+move most functions to an external R script, which I can just source here.
+
+```{r whalen_functions}
+# Some functions from Elizabeth that I might use...
+
+# computes normalization from libraries and then filters genes by having % 
+# samples with at least N counts and 
+setUpDGEList <- function(countData, filterCount=1, filterPercentage=0.1)
+{
+	d <- DGEList(counts=countData)
+	d <- calcNormFactors(d)
+
+	keepRows <- rowSums(round(cpm(d$counts)) >= filterCount) >= filterPercentage*ncol(countData)
+	print(table(keepRows))
+
+	curDGE<-d[keepRows,]
+	return(curDGE)
+}
+
+setUpSamples<-function(countData, designData, subsetSampleIndex)
+{
+curDesign<-designData[subsetSampleIndex,]
+# remove any individuals that don't have a stim and non-stim sample
+if (any(table(as.character(curDesign$donorID))==1))
+{
+remIndiv<-names(which(table(as.character(curDesign$donorID))==1))
+curDesign<-curDesign[-which(curDesign$donorID %in% remIndiv),]
+}
+countData<-countData[,which(colnames(countData) %in% curDesign$Library.ID)]
+
+return(list(countData=countData, curDesign=curDesign))
+}
+```
+
+#### Load data
+
+Next, load in counts and metrics data for the project, as well as sample
+annotation for project libraries.
+```{r load_data}
+# Read CSV file with read counts
+countFile <- "data/HMMF2ADXX_combined_counts_wMgiSymbol.csv"
+countDat <- read_csv(countFile) # 37991 obs. of  18 variables
+str(countDat)
+
+# Read CSV file with RNAseq/alignment metrics
+metricFile <- "data/HMMF2ADXX_combined_metrics.csv"
+metricDat <- read_csv(metricFile) # 16 obs. of  71 variables
+str(metricDat)
+
+# Read XLSX file with sample annotation
+designFile <- "data/JMD119 Sample Information .xlsx"
+designDat <- read_excel(designFile, skip = 1)
+```
+
