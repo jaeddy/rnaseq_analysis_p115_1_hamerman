@@ -11,7 +11,7 @@ setUpDGEList <- function(countData, filterCount=1, filterPercentage=0.1)
 {
 	d <- DGEList(counts=countData)
 	d <- calcNormFactors(d)
- 
+
 	keepRows <- rowSums(round(cpm(d$counts)) >= filterCount) >= filterPercentage*ncol(countData)
 	print(table(keepRows))
 
