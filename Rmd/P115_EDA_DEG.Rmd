@@ -7,7 +7,7 @@ output: html_document
 
 ```{r global_opts}
 knitr::opts_chunk$set(fig.width=8, fig.height=4, fig.align='center',
-                      echo=TRUE, warning=FALSE, message=FALSE)
+                      echo=FALSE, warning=FALSE, message=FALSE)
 knitr::opts_knit$set(root.dir = "..")
 ```
 
@@ -22,6 +22,7 @@ First, load required packages for data munging, visualization, and analysis
 # Load my go-to libraries
 library(dplyr)
 library(ggplot2)
+library(cowplot)
 library(stringr)
 library(readr)
 library(readxl)
@@ -41,11 +42,8 @@ paths.
 I need to test whether this does anything funky with how knitr saves files for
 the final HTML document...
 
-```{r set_directory}
-# Switch to the top level directory for the project
-# if (str_detect(getwd(), "Rmd")) {
-#     setwd("..")
-# }
+```{r source_functions}
+source("R/metric_qc_functions.R")
 ```
 
 #### Define functions
@@ -68,22 +66,8 @@ setUpDGEList <- function(countData, filterCount=1, filterPercentage=0.1)
 	keepRows <- rowSums(round(cpm(d$counts)) >= filterCount) >= filterPercentage*ncol(countData)
 	print(table(keepRows))
 
-	curDGE<-d[keepRows,]
+	curDGE <- d[keepRows,]
 	return(curDGE)
-}
-
-setUpSamples<-function(countData, designData, subsetSampleIndex)
-{
-curDesign<-designData[subsetSampleIndex,]
-# remove any individuals that don't have a stim and non-stim sample
-if (any(table(as.character(curDesign$donorID))==1))
-{
-remIndiv<-names(which(table(as.character(curDesign$donorID))==1))
-curDesign<-curDesign[-which(curDesign$donorID %in% remIndiv),]
-}
-countData<-countData[,which(colnames(countData) %in% curDesign$Library.ID)]
-
-return(list(countData=countData, curDesign=curDesign))
 }
 ```
 
@@ -117,13 +101,18 @@ to make life easier and avoid breaking downstream functions.
 gene <- countDat$mgiSymbol
 countDat <- countDat %>% 
     select(-geneName, -mgiSymbol)
-
+names(countDat) <- names(countDat) %>% 
+    str_extract("lib[0-9]+")
 
 # Reformat variable names in metrics data frame
 names(metricDat) <- names(metricDat) %>% 
     str_to_lower() %>%  # change variable names to lower case
     make.unique(sep = "_") # de-dup variable names
 names(metricDat)[1] <- "lib_id" # reformat libID variable name
+
+# Reformat row names in metrics dataframe
+metricDat <- metricDat %>% 
+    mutate(lib_id = str_extract(lib_id, "lib[0-9]+"))
 
 # Reformat variable names in design data frame
 names(designDat) <- names(designDat) %>% 
@@ -133,40 +122,57 @@ names(designDat) <- names(designDat) %>%
     str_to_lower() %>% # change to lower case
     str_replace("(?<=(lib))[a-z]+", "") %>% # replace 'library' with 'lib'
     make.unique(sep = "_") # de-dup variable names
+
+# Remove empty rows from design data frame
+designDat <- designDat %>% 
+    filter(!is.na(lib_id))
+    
+```
+
+```{r get_groups}
+groupDat <- designDat %>% 
+    mutate(koStatus = as.factor(tolower(str_extract(sample_name, "WT|BCAP"))),
+           hscPop = as.factor(tolower(str_extract(hsc_population, 
+                                                  "Long|Short")))) %>% 
+    select(libID = lib_id,
+           koStatus, hscPop)
 ```
 
 
 #### Plot metrics
 
-```{r}
-pass_fail_test <- Vectorize(function(condition) {
-    result <- factor(ifelse(condition, "pass", "fail"))
-})
-
+```{r summarize_metrics}
+# Pull out and format the subset of metrics to plot; ; melt data frame for plotting
 metricSummary <- metricDat %>% 
-    select(lib_id, median_cv_coverage, fastq_total_reads, 
-           mapped_reads_w_dups) %>% 
-    mutate(okCoverage = pass_fail_test(median_cv_coverage < 1),
-           okReads = pass_fail_test(fastq_total_reads > 1e6),
-           okAlignment = pass_fail_test(mapped_reads_w_dups > 0.8)) %>% 
-    melt(measure.vars = c("okCoverage", "okReads", "okAlignment"),
-         variable.name = "qcCheck", value.name = "result")
+    mutate(percentDuplication = unpaired_read_duplicates / 
+               unpaired_reads_examined) %>% 
+    select(libID = lib_id, 
+           medianCVcoverage = median_cv_coverage, 
+           fastqTotalReads = fastq_total_reads, 
+           percentAligned = mapped_reads_w_dups,
+           percentDuplication)
+
+```
 
 
+```{r plot_metrics}
 metricSummary %>% 
-    ggplot(aes(x = fastq_total_reads, y = mapped_reads_w_dups)) +
-    geom_point(aes(colour = result)) +
-    facet_wrap(~ qcCheck)
+    plot_metric_qc("medianCVcoverage", 1)
+metricSummary %>% 
+    plot_metric_qc("percentAligned", 0.7)
 ```
 
 #### Plot data
 
 ```{r}
-retDGE = setUpDGEList(countData = countDat, 
-                      filterCount = 50, 
+# Filter genes with (cpm > 1) in < 5% of samples
+dge = setUpDGEList(countData = countDat, 
+                      filterCount = 1, 
                       filterPercentage = 0.05)
 
-plotMDS(retDGE$counts,cex=.5, main="MDS, lib labeled") # may have to kick out one individual
+plotMDS(dge$counts, cex=.5, main="MDS, lib labeled",
+        col = as.numeric(groupDat$koStatus)) # may have to kick out one individual
+?plotMDS
 
 ```
 

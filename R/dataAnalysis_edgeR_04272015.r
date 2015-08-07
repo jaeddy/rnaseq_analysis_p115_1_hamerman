@@ -62,7 +62,7 @@ dev.off()
 des          = data.frame(donorID = as.factor(designSub$donorId))
 des$cellType = designSub$studyGroup
 
-#### method 1: voom with quality weights and use donor as a random effect 
+#### method 1: voom with quality weights and use donor as a random effect
 oneMM      <- model.matrix(~cellType, data=des)
 DMvNSvoom1 <- voomWithQualityWeights(retDGE, design=oneMM, plot=TRUE)
 
