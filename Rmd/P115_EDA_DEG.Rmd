@@ -8,23 +8,10 @@ output: html_document
 ```{r global_opts}
 knitr::opts_chunk$set(fig.width=8, fig.height=4, fig.align='center',
                       echo=TRUE, warning=FALSE, message=FALSE)
+knitr::opts_knit$set(root.dir = "..")
 ```
 
 ### Set up R environment
-
-#### Set working directory
-
-This is a small step that lets me switch between executing chunks interactively
-and knitting the entire Rmd document without having to constantly modify file
-paths. 
-
-I need to test whether this does anything funky with how knitr saves files for
-the final HTML document...
-
-```{r set_directory}
-# Switch to the top level directory for the project
-setwd("..")
-```
 
 #### Load packages
 
@@ -38,10 +25,27 @@ library(ggplot2)
 library(stringr)
 library(readr)
 library(readxl)
+library(reshape2)
 
 # ..plus some others I'll need here
 library(edgeR)
 library(limma)
+```
+
+#### Set working directory
+
+This is a small step that lets me switch between executing chunks interactively
+and knitting the entire Rmd document without having to constantly modify file
+paths. 
+
+I need to test whether this does anything funky with how knitr saves files for
+the final HTML document...
+
+```{r set_directory}
+# Switch to the top level directory for the project
+# if (str_detect(getwd(), "Rmd")) {
+#     setwd("..")
+# }
 ```
 
 #### Define functions
@@ -91,15 +95,78 @@ annotation for project libraries.
 # Read CSV file with read counts
 countFile <- "data/HMMF2ADXX_combined_counts_wMgiSymbol.csv"
 countDat <- read_csv(countFile) # 37991 obs. of  18 variables
-str(countDat)
+# str(countDat)
 
 # Read CSV file with RNAseq/alignment metrics
 metricFile <- "data/HMMF2ADXX_combined_metrics.csv"
 metricDat <- read_csv(metricFile) # 16 obs. of  71 variables
-str(metricDat)
+# str(metricDat)
 
 # Read XLSX file with sample annotation
 designFile <- "data/JMD119 Sample Information .xlsx"
-designDat <- read_excel(designFile, skip = 1)
+designDat <- read_excel(designFile, skip = 1) # 36 obs. of 18 variables
+# str(designDat)
+```
+
+
+#### Clean data
+
+I need to do a bit of cleaning/formatting with variable names (column headers)
+to make life easier and avoid breaking downstream functions.
+```{r clean_data}
+gene <- countDat$mgiSymbol
+countDat <- countDat %>% 
+    select(-geneName, -mgiSymbol)
+
+
+# Reformat variable names in metrics data frame
+names(metricDat) <- names(metricDat) %>% 
+    str_to_lower() %>%  # change variable names to lower case
+    make.unique(sep = "_") # de-dup variable names
+names(metricDat)[1] <- "lib_id" # reformat libID variable name
+
+# Reformat variable names in design data frame
+names(designDat) <- names(designDat) %>% 
+    str_replace_all(" +", "_") %>% # replace spaces with underscores
+    str_replace_all("#", "num") %>%  # replace # with 'num'
+    str_replace_all("(\\(|\\))", "") %>% # remove parentheses
+    str_to_lower() %>% # change to lower case
+    str_replace("(?<=(lib))[a-z]+", "") %>% # replace 'library' with 'lib'
+    make.unique(sep = "_") # de-dup variable names
+```
+
+
+#### Plot metrics
+
+```{r}
+pass_fail_test <- Vectorize(function(condition) {
+    result <- factor(ifelse(condition, "pass", "fail"))
+})
+
+metricSummary <- metricDat %>% 
+    select(lib_id, median_cv_coverage, fastq_total_reads, 
+           mapped_reads_w_dups) %>% 
+    mutate(okCoverage = pass_fail_test(median_cv_coverage < 1),
+           okReads = pass_fail_test(fastq_total_reads > 1e6),
+           okAlignment = pass_fail_test(mapped_reads_w_dups > 0.8)) %>% 
+    melt(measure.vars = c("okCoverage", "okReads", "okAlignment"),
+         variable.name = "qcCheck", value.name = "result")
+
+
+metricSummary %>% 
+    ggplot(aes(x = fastq_total_reads, y = mapped_reads_w_dups)) +
+    geom_point(aes(colour = result)) +
+    facet_wrap(~ qcCheck)
+```
+
+#### Plot data
+
+```{r}
+retDGE = setUpDGEList(countData = countDat, 
+                      filterCount = 50, 
+                      filterPercentage = 0.05)
+
+plotMDS(retDGE$counts,cex=.5, main="MDS, lib labeled") # may have to kick out one individual
+
 ```
 
