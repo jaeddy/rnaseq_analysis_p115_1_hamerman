@@ -3,69 +3,72 @@ cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442",
 
 # Function to return values of pass or fail depending on whether a vector of
 # values meets the specified condition
-pass_fail_test <- Vectorize(function(condition) {
-    result <- factor(ifelse(condition, "pass", "fail"))
+pass_fail_test <- function(value, range) {
+    result <- ifelse((value < range[1] | value > range[2]), 
+                     "fail", "pass")
     return(result)
-})
+}
 
-outlier_limit <- function(values, direction = c("low", "high")) {
+# Function to calculate upper and lower limits for detecting outliers in a
+# vector of values
+outlier_limits <- function(values) {
     medVal <- median(values)
     outRange <- 1.5 * IQR(values) / 2
-    if (direction == "low") {
-        outLim <- medVal - outRange
-    } else {
-        outLim <- medVal + outRange
-    }
-    return(outLim)
+    outLims <- c(medVal - outRange, medVal + outRange)
+    return(outLims)
 }
 
-qc_metric <- function(metricsSummary, metric, cutoff) {
-    qcTest <- switch(metric, 
-                     medianCVcoverage = function(x) { x < cutoff },
-                     percentAligned = function(x) { x > cutoff })
-    outlierTest <- switch(metric,
-                          medianCVcoverage = function(x) { 
-                              x > outlier_limit(x, "high") },
-                          percentAligned = function(x) {
-                              x < outlier_limit(x, "low") })
-    direction <- switch(metric, 
-                        medianCVcoverage = "high",
-                        percentAligned = "low")
-    
-    metricQC <- metricSummary %>% 
-        select(libID, fastqTotalReads,
-               metricValue = one_of(metric)) %>% 
-        mutate(qcPassFail = pass_fail_test(qcTest(metricValue)),
-               metricOutlier = as.factor(ifelse(outlierTest(metricValue),
-                                                1, 0)),
-               readsOutlier = as.factor(ifelse(fastqTotalReads <
-                                                   outlier_limit(fastqTotalReads, "low"),
-                                               1, 0)),
-               outlierLabel = ifelse(metricOutlier == 1 | 
-                                         readsOutlier == 1,
-                                     libID, ""))
+# Function to simplify the data frame for downstream functions
+format_plot_data <- function(df, metric = c("percentAligned", 
+                                            "medianCVcoverage")) {
+    df %>% 
+        select(libID, x = fastqTotalReads, y = one_of(metric))
 }
 
-plot_metric_qc <- function(metricsSummary, metric, cutoff) {
-    metricQC <- qc_metric(metricQC, metric, cutoff)
+# Label data points that are outliers or that fail QC
+label_libs <- function(libID, xPassFail, yPassFail, 
+                       xValue, xOutLims, 
+                       yValue, yOutLims) {
+    label <- ifelse((xPassFail == "fail" |
+                         yPassFail == "fail" |
+                         xValue < xOutLims[1] | 
+                         xValue > xOutLims[2] |
+                         yValue < yOutLims[1] |
+                         yValue > yOutLims[2]),
+                    libID, "")
+}
+
+# Build the final metric plot
+plot_metric <- function(df, metric, yRange, xRange) {
+    plotDat <- format_plot_data(df, metric)
+    xOutLims <- outlier_limits(plotDat$x)
+    yOutLims <- outlier_limits(plotDat$y)
     
-    if ("fail" %in% levels(metricQC$qcPassFail)) {
-        qcCol <- cbPalette[c(2, 6)]
-    } else {
-        qcCol <- cbPalette[6]
-    }
-    
-    metricQC %>% 
-        ggplot(aes(x = fastqTotalReads, y = metricValue)) +
-        geom_point(aes(alpha = metricOutlier, shape = readsOutlier), 
-                   size = 5, colour = "black") + 
-        geom_point(aes(colour = qcPassFail, shape = readsOutlier), 
-                   size = 3) +
-        scale_colour_manual(values = qcCol) + 
-        scale_shape_manual(values = c(16, 15)) +
-        scale_alpha_manual(values = c(0, 1)) +
-        geom_text(aes(label = outlierLabel),
-                  hjust = -0.1, vjust = 1.1, size = 3) +
-        theme_classic() +
-        ggtitle(metric)
+    plotDat %>% 
+        mutate(yPassFail = as.factor(pass_fail_test(y, yRange)) %>% 
+                   relevel("pass"),
+               xPassFail = as.factor(pass_fail_test(x, xRange)) %>% 
+                   relevel("pass"),
+               label = label_libs(libID, xPassFail, yPassFail,
+                                  x, xOutLims, y, yOutLims),
+               label = label_libs(libID, xPassFail, yPassFail,
+                                  x, xOutLims, y, yOutLims)) %>% 
+        ggplot(aes(x, y)) +
+        geom_hline(yintercept = yOutLims, linetype = 3) +
+        geom_hline(yintercept = yRange, linetype = 1, colour = "red3", 
+                   size = 2) +
+        geom_vline(xintercept = xOutLims, linetype = 3) +
+        geom_vline(xintercept = xRange, linetype = 1, colour = "red3", 
+                   size = 2) +
+        geom_point(aes(fill = yPassFail, alpha = xPassFail), 
+                   shape = 21, size = 5, colour = "white") +
+        geom_text(aes(label = label),
+                  hjust = -0.2, vjust = 1.2, size = 4) +
+        scale_alpha_manual(values = c(0.8, 0.4), guide = FALSE) +
+        scale_fill_colorblind(guide = FALSE) + 
+        scale_linetype_discrete(breaks = c(1, 3),
+                                labels = c("outlier", "qcCutoff")) +
+        xlab("fastqTotalReads") +
+        ylab(metric) +
+        theme_classic()
 }

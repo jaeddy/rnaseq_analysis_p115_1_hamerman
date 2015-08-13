@@ -2,6 +2,7 @@
 title: "P115-1 Analysis"
 author: "James Eddy"
 date: "July 31, 2015"
+runtime: shiny
 output: html_document
 ---
 
@@ -22,7 +23,7 @@ First, load required packages for data munging, visualization, and analysis
 # Load my go-to libraries
 library(dplyr)
 library(ggplot2)
-library(cowplot)
+library(ggthemes)
 library(stringr)
 library(readr)
 library(readxl)
@@ -33,14 +34,7 @@ library(edgeR)
 library(limma)
 ```
 
-#### Set working directory
-
-This is a small step that lets me switch between executing chunks interactively
-and knitting the entire Rmd document without having to constantly modify file
-paths. 
-
-I need to test whether this does anything funky with how knitr saves files for
-the final HTML document...
+Functions for plotting metrics are contained in `metric_qc_functions.R`.
 
 ```{r source_functions}
 source("R/metric_qc_functions.R")
@@ -58,15 +52,20 @@ move most functions to an external R script, which I can just source here.
 
 # computes normalization from libraries and then filters genes by having % 
 # samples with at least N counts and 
-setUpDGEList <- function(countData, filterCount=1, filterPercentage=0.1)
+setUpDGEList <- function(countData, filterCount = 1, filterPercentage = 0.1)
 {
-	d <- DGEList(counts=countData)
+	d <- DGEList(counts = countData)
 	d <- calcNormFactors(d)
 
-	keepRows <- rowSums(round(cpm(d$counts)) >= filterCount) >= filterPercentage*ncol(countData)
+	keepRows <- rowSums(round(cpm(d$counts)) >= filterCount) >= 
+	    filterPercentage*ncol(countData)
 	print(table(keepRows))
 
-	curDGE <- d[keepRows,]
+	curDGE <- d[keepRows, ]
+	
+	# reset library sizes
+	# curDGE$samples$lib.size <- colSums(curDGE$counts)
+	
 	return(curDGE)
 }
 ```
@@ -133,9 +132,10 @@ designDat <- designDat %>%
 groupDat <- designDat %>% 
     mutate(koStatus = as.factor(tolower(str_extract(sample_name, "WT|BCAP"))),
            hscPop = as.factor(tolower(str_extract(hsc_population, 
-                                                  "Long|Short")))) %>% 
+                                                  "Long|Short"))),
+           group = str_c(koStatus, hscPop, sep = "_")) %>% 
     select(libID = lib_id,
-           koStatus, hscPop)
+           koStatus, hscPop, group)
 ```
 
 
@@ -154,25 +154,117 @@ metricSummary <- metricDat %>%
 
 ```
 
+Adjust slider bars to set QC cutoffs (red lines) for x- and y-axis; dashed
+lines indicate outlier limits (1.5*IQR).
 
-```{r plot_metrics}
-metricSummary %>% 
-    plot_metric_qc("medianCVcoverage", 1)
-metricSummary %>% 
-    plot_metric_qc("percentAligned", 0.7)
+##### Percent Aligned
+
+```{r plot_perc_alingned_shiny}
+sliderInput("alignCutoff", "percent aligned cutoff:", 
+            min = 0, max = 1, step = 0.01,
+            value = 0.8)
+sliderInput("readsCutoff", "total FASTQ reads cutoff:", 
+            min = 0, max = 5e7, step = 1e5,
+            value = 1e6)
+
+renderPlot({
+    yRange <-c(input$alignCutoff, 1)
+    xRange <- c(input$readsCutoff, max(metricSummary$fastqTotalReads) + 1e6)
+    
+    metricSummary %>%
+        plot_metric("percentAligned", yRange, xRange)
+})
+
 ```
 
-#### Plot data
+##### Median CV Coverage
+
+```{r plot_med_cv_cov_shiny}
+sliderInput("covCutoff", "median CV coverage cutoff:", 
+            min = 0, max = 3, step = 0.01,
+            value = 1)
+sliderInput("readsCutoff", "total FASTQ reads cutoff:", 
+            min = 0, max = 5e7, step = 1e5,
+            value = 1e6)
+
+renderPlot({
+    yRange <- c(0, input$covCutoff)
+    xRange <- c(input$readsCutoff, max(metricSummary$fastqTotalReads) + 1e6)
+    
+    metricSummary %>%
+        plot_metric("medianCVcoverage", yRange, xRange)
+})
+
+```
+
+#### Examine data
+
+```{r}
+d1 <- DGEList(countDat)
+d1 <- calcNormFactors(d1)
+normFactorTest <- d1$samples %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(test = "preFilter") %>% 
+    select(-group)
+
+filterCount <- 100
+filterPercentage <- 0.2
+d3 <- DGEList(countDat)
+keepRows <- rowSums(round(cpm(d3$counts)) >= filterCount) >= 
+    filterPercentage*ncol(countDat)
+d3 <- d3[keepRows, ]
+d3 <- calcNormFactors(d3)
+normFactorTest <- d3$samples %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(test = "postFilter") %>% 
+    select(-group) %>% 
+    bind_rows(normFactorTest, .)
+
+d5 <- DGEList(countDat)
+keepRows <- rowSums(round(cpm(d5$counts)) >= filterCount) >= 
+    filterPercentage*ncol(countDat)
+d5 <- d5[keepRows, ]
+d5$samples$lib.size <- colSums(d5$counts)
+d5 <- calcNormFactors(d5)
+normFactorTest <- d5$samples %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(test = "postFilter_corrected") %>% 
+    select(-group) %>% 
+    bind_rows(normFactorTest, .)
+
+normFactorTest %>% 
+    mutate(test = relevel(as.factor(test), "preFilter")) %>% 
+    ggplot(aes(x = libID, y = norm.factors)) +
+    geom_bar(aes(fill = test), stat = "identity", 
+               colour = "white",
+               position = "dodge") +
+    scale_fill_colorblind()
+```
 
 ```{r}
 # Filter genes with (cpm > 1) in < 5% of samples
 dge = setUpDGEList(countData = countDat, 
-                      filterCount = 1, 
-                      filterPercentage = 0.05)
+                      filterCount = 100, 
+                      filterPercentage = 0.20)
 
-plotMDS(dge$counts, cex=.5, main="MDS, lib labeled",
-        col = as.numeric(groupDat$koStatus)) # may have to kick out one individual
-?plotMDS
+dim(dge)
+head(dge$counts)
+head(cpm(dge))
+apply(dge$counts, 2, sum)
+str(dge)
+```
+
+
+#### Plot data
+
+```{r}
+
+
+# pca <- prcomp(dge$counts)
+# pcaDat <- data.frame(groupDat, pca$x[, 1:3])
+# plotMDS(dge$counts, cex=.5, main="MDS, lib labeled",
+#         col = as.numeric(groupDat$koStatus)) # may have to kick out one individual
+# ?plotMDS
 
 ```
 
