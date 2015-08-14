@@ -3,20 +3,26 @@ title: "P115-1 Analysis"
 author: "James Eddy"
 date: "July 31, 2015"
 runtime: shiny
-output: html_document
+output: 
+  html_document:
+    css: custom.css
 ---
 
-```{r global_opts}
+```{r global_opts, echo=FALSE}
 knitr::opts_chunk$set(fig.width=8, fig.height=4, fig.align='center',
-                      echo=FALSE, warning=FALSE, message=FALSE)
+                      echo=TRUE, warning=FALSE, message=FALSE)
 knitr::opts_knit$set(root.dir = "..")
+
+## numbers >= 10^5 will be denoted in scientific notation,
+## and rounded to 2 digits
+options(scipen = 1, digits = 2)
 ```
 
 ### Set up R environment
 
 #### Load packages
 
-First, load required packages for data munging, visualization, and analysis
+First, load `required` packages for data munging, visualization, and analysis
 (these are largely Hadley Wickham libraries, plus some Bioconductor tools).
 
 ```{r load_packages}
@@ -32,7 +38,16 @@ library(reshape2)
 # ..plus some others I'll need here
 library(edgeR)
 library(limma)
+library(ggfortify)
+
+# packages for R markdown stuff
+library(knitr)
+library(shiny)
 ```
+
+\  
+
+#### Define functions
 
 Functions for plotting metrics are contained in `metric_qc_functions.R`.
 
@@ -40,40 +55,47 @@ Functions for plotting metrics are contained in `metric_qc_functions.R`.
 source("R/metric_qc_functions.R")
 ```
 
-#### Define functions
-
-These are functions written by Elizabeth Whalen (shared by Michael Mason) that
-might come in handy with some steps of the analysis. I might rewrite these at
-some point to better match my own coding style and/or needs. I'll also likely
-move most functions to an external R script, which I can just source here.
+This is a function written by Elizabeth Whalen (shared by Michael Mason) that
+might come in handy with some steps of the analysis. I've modified the fucntion
+slightly, such that library sizes are updated and normalization factors are
+calculated *after* filtering genes.
 
 ```{r whalen_functions}
-# Some functions from Elizabeth that I might use...
-
-# computes normalization from libraries and then filters genes by having % 
-# samples with at least N counts and 
+# Function to build DGEList object, filter genes by keeping only those having % 
+# samples with at least N counts, and computes normalization from library sizes
 setUpDGEList <- function(countData, filterCount = 1, filterPercentage = 0.1)
 {
 	d <- DGEList(counts = countData)
-	d <- calcNormFactors(d)
-
+	# d <- calcNormFactors(d) # moved further down
+    
+	# Filter all genes that do not have at least 'filterCount' counts per 
+	# million in at least 'filterPercentage' percent of libraries
 	keepRows <- rowSums(round(cpm(d$counts)) >= filterCount) >= 
 	    filterPercentage*ncol(countData)
 	print(table(keepRows))
 
 	curDGE <- d[keepRows, ]
 	
-	# reset library sizes
-	# curDGE$samples$lib.size <- colSums(curDGE$counts)
+	# James: I've added this change so that library sizes and normalization
+	# factors will always be updated/calculated after filtering genes
 	
+	# reset library sizes
+	curDGE$samples$lib.size <- colSums(curDGE$counts)
+	
+	# calculate normalization factors (effective library size = 
+	# lib.size * norm.factor)
+	curDGE <- calcNormFactors(curDGE)
 	return(curDGE)
 }
 ```
+
+\  
 
 #### Load data
 
 Next, load in counts and metrics data for the project, as well as sample
 annotation for project libraries.
+
 ```{r load_data}
 # Read CSV file with read counts
 countFile <- "data/HMMF2ADXX_combined_counts_wMgiSymbol.csv"
@@ -91,12 +113,16 @@ designDat <- read_excel(designFile, skip = 1) # 36 obs. of 18 variables
 # str(designDat)
 ```
 
+\  
 
 #### Clean data
 
 I need to do a bit of cleaning/formatting with variable names (column headers)
 to make life easier and avoid breaking downstream functions.
+
 ```{r clean_data}
+# Separate gene counts and gene symbols into separate objects, reformat
+# variable names in countDat to only include libID
 gene <- countDat$mgiSymbol
 countDat <- countDat %>% 
     select(-geneName, -mgiSymbol)
@@ -117,6 +143,7 @@ metricDat <- metricDat %>%
 names(designDat) <- names(designDat) %>% 
     str_replace_all(" +", "_") %>% # replace spaces with underscores
     str_replace_all("#", "num") %>%  # replace # with 'num'
+    str_replace_all("/", "_per_") %>% 
     str_replace_all("(\\(|\\))", "") %>% # remove parentheses
     str_to_lower() %>% # change to lower case
     str_replace("(?<=(lib))[a-z]+", "") %>% # replace 'library' with 'lib'
@@ -125,24 +152,38 @@ names(designDat) <- names(designDat) %>%
 # Remove empty rows from design data frame
 designDat <- designDat %>% 
     filter(!is.na(lib_id))
-    
 ```
+
+I'll also create a new object to store the salient information about groups in
+the study I might want to compare.
 
 ```{r get_groups}
 groupDat <- designDat %>% 
+    # extract knockout status (WT or BCAP) and HSC population (long or short'
+    # term); combine into a single group vector
     mutate(koStatus = as.factor(tolower(str_extract(sample_name, "WT|BCAP"))),
            hscPop = as.factor(tolower(str_extract(hsc_population, 
                                                   "Long|Short"))),
-           group = str_c(koStatus, hscPop, sep = "_")) %>% 
+           group = as.factor(str_c(koStatus, hscPop, sep = "_"))) %>% 
     select(libID = lib_id,
            koStatus, hscPop, group)
 ```
 
+For reference, here are the relevant groups in the data:
+
+`r kable(groupDat)`
+
+-----
+
+### Inspect data
 
 #### Plot metrics
 
+Next, I'll look at a few standard metrics to see whether any libraries should
+be excluded due to quality reasons.
+
 ```{r summarize_metrics}
-# Pull out and format the subset of metrics to plot; ; melt data frame for plotting
+# Pull out and format the subset of metrics to plot; melt data frame for plotting
 metricSummary <- metricDat %>% 
     mutate(percentDuplication = unpaired_read_duplicates / 
                unpaired_reads_examined) %>% 
@@ -151,15 +192,23 @@ metricSummary <- metricDat %>%
            fastqTotalReads = fastq_total_reads, 
            percentAligned = mapped_reads_w_dups,
            percentDuplication)
-
 ```
 
-Adjust slider bars to set QC cutoffs (red lines) for x- and y-axis; dashed
-lines indicate outlier limits (1.5*IQR).
+Cutoffs are set by default to standard values used in the Bioinformatics Core
+for three metrics; libraries are considered to have 'failed' QC for the 
+following conditions:  
+* < 1 million total FASTQ reads  
+* < 80% aligned reads  
+* > 1.0 median CV coverage
+
+I can also adjust slider bars to look at different QC cutoffs (red lines) for 
+the x- and y-axis; dashed lines indicate outlier limits (1.5*IQR).
+
+\  
 
 ##### Percent Aligned
 
-```{r plot_perc_alingned_shiny}
+```{r plot_perc_alingned_shiny, echo=FALSE}
 sliderInput("alignCutoff", "percent aligned cutoff:", 
             min = 0, max = 1, step = 0.01,
             value = 0.8)
@@ -174,12 +223,27 @@ renderPlot({
     metricSummary %>%
         plot_metric("percentAligned", yRange, xRange)
 })
-
 ```
+
+***Percent aligned:***  
+Percentage of aligned reads is well above the 80% cutoff for all libraries, 
+with rates in the mid-90s across the board. **lib7422** is outside the nominal
+outlier range, but still has `r filter(metricSummary, libID == "lib7422") %>% 
+select(percentAligned) * 100`% alignment.
+
+***Total reads:***  
+While all libraries had well over 10 million reads in the input FASTQ file 
+(after adapter trimming), **lib7418** appears to be quite a bit smaller than
+average the average of 
+`r summarise(metricSummary, mean(fastqTotalReads)) / 1e6` million reads, with 
+only `r filter(metricSummary, libID == "lib7418") %>% select(fastqTotalReads) /
+1e6` million reads.
+
+\  
 
 ##### Median CV Coverage
 
-```{r plot_med_cv_cov_shiny}
+```{r plot_med_cv_cov_shiny, echo=FALSE}
 sliderInput("covCutoff", "median CV coverage cutoff:", 
             min = 0, max = 3, step = 0.01,
             value = 1)
@@ -194,77 +258,102 @@ renderPlot({
     metricSummary %>%
         plot_metric("medianCVcoverage", yRange, xRange)
 })
-
 ```
+
+***Median CV coverage:***  
+All libraries look good (with `medianCVcoverage` generally close to 0.5) in
+terms of gene coverage among the top 1000 transcripts.
+
+\  
 
 #### Examine data
 
-```{r}
+I'll use the function defined above to build the `DGEList` object for the data,
+which is the input for downstream functions.
+
+```{r build_dge_list}
+# Filter genes with (cpm > 1) in < 5% of samples
+dge = setUpDGEList(countData = countDat, 
+                      filterCount = 1, 
+                      filterPercentage = 0.20)
+
+str(dge)
+```
+
+Keeping only those genes with >= 1 counts per million in at least 20% (`r 0.2 *
+nrow(groupDat)` samples), we're left with `r nrow(dge)` genes.
+
+##### Sanity check
+
+To verify the effect of the change I made to Elizabeth's code above, I'll plot
+`norm.factors` and effective library size (`lib.size.eff`) under two 
+scenarios:
+
+* **preFilter:** `norm.factors` are calculated before genes are filtered
+* **postFilter:** `norm.factors` are calculated after genes are filtered and
+library sizes are updated
+
+```{r sanity_check, echo=FALSE}
+# pre-filter calculation of norm.factors
 d1 <- DGEList(countDat)
 d1 <- calcNormFactors(d1)
+
+# initialize data frame to store results from both scenarios
 normFactorTest <- d1$samples %>% 
     add_rownames(var = "libID") %>% 
     mutate(test = "preFilter") %>% 
     select(-group)
 
-filterCount <- 100
+# post-filter calculation of norm.factors
+filterCount <- 1
 filterPercentage <- 0.2
-d3 <- DGEList(countDat)
-keepRows <- rowSums(round(cpm(d3$counts)) >= filterCount) >= 
+d2 <- DGEList(countDat)
+keepRows <- rowSums(round(cpm(d2$counts)) >= filterCount) >= 
     filterPercentage*ncol(countDat)
-d3 <- d3[keepRows, ]
-d3 <- calcNormFactors(d3)
-normFactorTest <- d3$samples %>% 
+d2 <- d2[keepRows, ]
+d2$samples$lib.size <- colSums(d2$counts)
+d2 <- calcNormFactors(d2)
+
+# update combined data frame
+normFactorTest <- d2$samples %>% 
     add_rownames(var = "libID") %>% 
     mutate(test = "postFilter") %>% 
     select(-group) %>% 
     bind_rows(normFactorTest, .)
 
-d5 <- DGEList(countDat)
-keepRows <- rowSums(round(cpm(d5$counts)) >= filterCount) >= 
-    filterPercentage*ncol(countDat)
-d5 <- d5[keepRows, ]
-d5$samples$lib.size <- colSums(d5$counts)
-d5 <- calcNormFactors(d5)
-normFactorTest <- d5$samples %>% 
-    add_rownames(var = "libID") %>% 
-    mutate(test = "postFilter_corrected") %>% 
-    select(-group) %>% 
-    bind_rows(normFactorTest, .)
-
+# plot norm.factors and lib.size.eff for both scenarios
 normFactorTest %>% 
-    mutate(test = relevel(as.factor(test), "preFilter")) %>% 
-    ggplot(aes(x = libID, y = norm.factors)) +
-    geom_bar(aes(fill = test), stat = "identity", 
-               colour = "white",
-               position = "dodge") +
+    mutate(test = relevel(as.factor(test), "preFilter"),
+           lib.size.eff = norm.factors * lib.size) %>% 
+    melt(measure.vars = c("norm.factors", "lib.size.eff")) %>% 
+    ggplot(aes(x = libID, y = value)) +
+    geom_point(aes(fill = test), shape = 21, size = 3,
+               colour = "white", alpha = 0.7,
+               position = position_jitter(width = 0.1, height = 0)) +
+    facet_wrap(~ variable, scales = "free_y") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 90),
+          panel.grid.major = element_line(colour = "grey", linetype = 3)) +
     scale_fill_colorblind()
 ```
 
-```{r}
-# Filter genes with (cpm > 1) in < 5% of samples
-dge = setUpDGEList(countData = countDat, 
-                      filterCount = 100, 
-                      filterPercentage = 0.20)
-
-dim(dge)
-head(dge$counts)
-head(cpm(dge))
-apply(dge$counts, 2, sum)
-str(dge)
-```
-
+For the not-to-stringent threshold used to filter genes (CPM > 1 in 20% of
+samples), the order of operations for calculating `norm.factors` appears to
+have minimal impact on effective library sizes.
 
 #### Plot data
 
 ```{r}
+pca <- prcomp(t(dge$counts))
+autoplot(pca, data = groupDat, colour = 'group', shape = FALSE) +
+    scale_color_colorblind()
 
+confoundDat <- designDat %>% 
+    select(libID = lib_id, sort_date, age_in_weeks, ng_per_ul) %>% 
+    left_join(metricSummary, by = c("libID" = "libID")) %>% 
+    bind_cols(groupDat %>% select(-libID))
 
-# pca <- prcomp(dge$counts)
-# pcaDat <- data.frame(groupDat, pca$x[, 1:3])
-# plotMDS(dge$counts, cex=.5, main="MDS, lib labeled",
-#         col = as.numeric(groupDat$koStatus)) # may have to kick out one individual
-# ?plotMDS
-
+pc1Dat <- bind_cols(confoundDat, melt(pca$x[, 1], value.name = "pc1"))
+ggpairs(pc1Dat)
 ```
 
