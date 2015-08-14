@@ -354,6 +354,11 @@ confoundDat <- designDat %>%
     bind_cols(groupDat %>% select(-libID))
 
 pc1Dat <- bind_cols(confoundDat, melt(pca$x[, 1], value.name = "pc1"))
-ggpairs(pc1Dat)
+pc1Dat %>% 
+    melt(measure.vars = setdiff(names(confoundDat), "libID")) %>%
+    ggplot(aes(x = pc1, y = value)) +
+    geom_point() +
+    facet_wrap(~ variable, scales = "free_y")
+
 ```
 
