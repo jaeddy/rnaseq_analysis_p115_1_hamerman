@@ -61,9 +61,9 @@ plot_metric <- function(df, metric, yRange, xRange) {
         geom_vline(xintercept = xRange, linetype = 1, colour = "red3", 
                    size = 2) +
         geom_point(aes(fill = yPassFail, alpha = xPassFail), 
-                   shape = 21, size = 5, colour = "white") +
+                   shape = 21, size = 3, colour = "white") +
         geom_text(aes(label = label),
-                  hjust = -0.2, vjust = 1.2, size = 4) +
+                  hjust = -0.2, vjust = 1.2, size = 3) +
         scale_alpha_manual(values = c(0.8, 0.4), guide = FALSE) +
         scale_fill_colorblind(guide = FALSE) + 
         scale_linetype_discrete(breaks = c(1, 3),

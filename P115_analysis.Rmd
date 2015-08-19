@@ -1,0 +1,932 @@
+---
+title: "P115-1 Analysis"
+author: "James Eddy"
+date: "July 31, 2015"
+output: 
+  html_document: 
+    css: custom.css
+    highlight: pygments
+---
+
+```{r global_opts, echo=FALSE, cache=FALSE}
+knitr::opts_chunk$set(fig.width=8, fig.height=4, fig.align='center',
+                      echo=TRUE, warning=FALSE, message=FALSE,
+                      cache=TRUE, autodep=TRUE)
+# knitr::opts_knit$set(root.dir = "..")
+
+## numbers >= 10^5 will be denoted in scientific notation,
+## and rounded to 2 digits
+options(scipen = 1, digits = 2)
+```
+
+### R environment set-up
+
+#### Loading packages
+
+I first loaded required packages for data munging, visualization, and 
+analysis (these are largely Hadley Wickham libraries, plus some 
+**`Bioconductor`** tools).
+
+```{r load_packages, cache=FALSE}
+rm(list = ls())
+gc()
+
+# Load libraries I'll need here
+library(edgeR)
+library(limma)
+library(biomaRt)
+library(ggfortify)
+
+# Load my go-to libraries
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(stringr)
+library(readr)
+library(readxl)
+library(reshape2)
+
+# Packages for R markdown stuff
+library(knitr)
+library(shiny)
+```
+
+\  
+
+#### Defining functions
+
+Functions for plotting metrics are contained in `metric_qc_functions.R`.
+
+```{r source_functions, cache=FALSE}
+source("R/metric_qc_functions.R")
+```
+
+This is a function written by Elizabeth Whalen (shared by Michael Mason) that
+might come in handy with some steps of the analysis. I modified the function
+slightly, such that library sizes are updated and normalization factors are
+calculated *after* filtering genes. I also added the option to input gene
+annotation information.
+
+```{r whalen_functions}
+# Function to build DGEList object, filter genes by keeping only those having % 
+# samples with at least N counts, and computes normalization from library sizes
+setUpDGEList <- function(countData, geneData = NULL, 
+                         filterCount = 1, filterPercentage = 0.1)
+{
+	d <- DGEList(counts = countData, genes = geneData)
+	# d <- calcNormFactors(d) # moved further down
+    
+	# Filter all genes that do not have at least 'filterCount' counts per 
+	# million in at least 'filterPercentage' percent of libraries
+	keepRows <- rowSums(round(cpm(d$counts)) >= filterCount) >= 
+	    filterPercentage*ncol(countData)
+	print(table(keepRows))
+
+	curDGE <- d[keepRows, ]
+	
+	# James: I've added this change so that library sizes and normalization
+	# factors will always be updated/calculated after filtering genes
+	
+	# reset library sizes
+	curDGE$samples$lib.size <- colSums(curDGE$counts)
+	
+	# calculate normalization factors (effective library size = 
+	# lib.size * norm.factor)
+	curDGE <- calcNormFactors(curDGE)
+	return(curDGE)
+}
+```
+
+\  
+
+#### Loading data
+
+Next, I read counts and metrics data for the project into R, along with sample
+annotation for project libraries.
+
+```{r load_data}
+# Read CSV file with read counts
+countFile <- "data/HMMF2ADXX_combined_counts.csv"
+countDat <- read_csv(countFile) # 37991 obs. of  18 variables
+# str(countDat)
+
+# Read CSV file with RNAseq/alignment metrics
+metricFile <- "data/HMMF2ADXX_combined_metrics.csv"
+metricDat <- read_csv(metricFile) # 16 obs. of  71 variables
+# str(metricDat)
+
+# Read XLSX file with sample annotation
+designFile <- "data/JMD119 Sample Information .xlsx"
+designDat <- read_excel(designFile, skip = 1) # 36 obs. of 18 variables
+# str(designDat)
+```
+
+\  
+
+#### Cleaning data
+
+I needed to do a bit of cleaning/formatting with variable names (column 
+headers) to make life easier and avoid breaking downstream functions.
+
+```{r clean_data}
+# Separate gene counts and gene symbols into separate objects, reformat
+# variable names in countDat to only include libID
+geneDat <- data_frame(ensemblID = countDat$geneName)
+countDat <- countDat %>% 
+    select(-geneName)
+names(countDat) <- names(countDat) %>% 
+    str_extract("lib[0-9]+")
+
+# Reformat variable names in metrics data frame
+names(metricDat) <- names(metricDat) %>% 
+    str_to_lower() %>%  # change variable names to lower case
+    make.unique(sep = "_") # de-dup variable names
+names(metricDat)[1] <- "lib_id" # reformat libID variable name
+
+# Reformat row names in metrics dataframe
+metricDat <- metricDat %>% 
+    mutate(lib_id = str_extract(lib_id, "lib[0-9]+"))
+
+# Reformat variable names in design data frame
+names(designDat) <- names(designDat) %>% 
+    str_replace_all(" +", "_") %>% # replace spaces with underscores
+    str_replace_all("#", "num") %>%  # replace # with 'num'
+    str_replace_all("/", "_per_") %>% 
+    str_replace_all("(\\(|\\))", "") %>% # remove parentheses
+    str_to_lower() %>% # change to lower case
+    str_replace("(?<=(lib))[a-z]+", "") %>% # replace 'library' with 'lib'
+    make.unique(sep = "_") # de-dup variable names
+
+# Remove empty rows from design data frame
+designDat <- designDat %>% 
+    filter(!is.na(lib_id))
+```
+
+\  
+
+I created a new object to store the salient information about groups in the 
+study I want to compare.
+
+```{r get_groups}
+groupDat <- designDat %>% 
+    # extract knockout status (WT or BCAP) and HSC population (long or short'
+    # term); combine into a single group vector
+    mutate(koStatus = as.factor(tolower(str_extract(sample_name, "WT|BCAP"))),
+           hscPop = as.factor(tolower(str_extract(hsc_population, 
+                                                  "Long|Short"))),
+           group = as.factor(str_c(koStatus, hscPop, sep = "_"))) %>% 
+    select(libID = lib_id,
+           koStatus, hscPop, group)
+```
+
+For reference, here are the relevant groups in the data (stored in `groupDat`):
+
+`r kable(groupDat, format = "html")`
+
+-----
+
+### Inspecting data
+
+#### Metric plotting & QC
+
+Next, I looked at a few standard metrics to see whether any libraries should
+be excluded due to quality reasons.
+
+```{r summarize_metrics}
+# Pull out and format the subset of metrics to plot
+metricSummary <- metricDat %>% 
+    mutate(percentDuplication = unpaired_read_duplicates / 
+               unpaired_reads_examined) %>% 
+    select(libID = lib_id, 
+           medianCVcoverage = median_cv_coverage, 
+           fastqTotalReads = fastq_total_reads, 
+           percentAligned = mapped_reads_w_dups,
+           percentDuplication)
+```
+
+Cutoffs are set by default to standard values used in the Bioinformatics Core
+for three metrics; libraries are considered to have 'failed' QC for the 
+following conditions:  
+
+* < 1 million total FASTQ reads  
+* < 80% aligned reads  
+* \> 1.0 median CV coverage
+
+I can also adjust slider bars to look at different QC cutoffs (red lines) for 
+the x- and y-axis; dashed lines indicate outlier limits (1.5*IQR).
+
+\  
+
+##### Percent aligned
+
+Percent aligned is simply the number of FASTQ reads for which there is a
+corresponding alignment in the **`TopHat`** BAM file. In other words,
+`percentAligned` = # of aligned reads (+ all their duplicate reads, which
+were removed from the final BAM) / `fastqTotalReads`.
+
+```{r plot_perc_alingned_shiny, echo=FALSE, cache=FALSE}
+# Skipping the shiny version for now...
+# sliderInput("alignCutoff", "percent aligned cutoff:", 
+#             min = 0, max = 1, step = 0.01,
+#             value = 0.8)
+# sliderInput("readsCutoff", "total FASTQ reads cutoff:", 
+#             min = 0, max = 5e7, step = 1e5,
+#             value = 1e6)
+
+input <- list(alignCutoff = 0.8,
+              readsCutoff = 1e6,
+              covCutoff = 1.0)
+
+# renderPlot({
+    yRange <-c(input$alignCutoff, 1)
+    xRange <- c(input$readsCutoff, max(metricSummary$fastqTotalReads) + 1e6)
+    
+    metricSummary %>%
+        plot_metric("percentAligned", yRange, xRange)
+# })
+```
+
+***Percent aligned:***  
+Percentage of aligned reads is well above the 80% cutoff for all libraries, 
+with rates in the mid-90s across the board. **lib7422** is outside the nominal
+outlier range, but still has `r filter(metricSummary, libID == "lib7422") %>% 
+select(percentAligned) * 100`% alignment.
+
+***Total reads:***  
+While all libraries had well over 10 million reads in the input FASTQ file 
+(after adapter trimming), **lib7418** appears to be quite a bit smaller than
+average the average of 
+`r summarise(metricSummary, mean(fastqTotalReads)) / 1e6` million reads, with 
+only `r filter(metricSummary, libID == "lib7418") %>% select(fastqTotalReads) /
+1e6` million reads.
+
+\  
+
+##### Median CV coverage
+
+Median CV coverage is calculated by **`Picard`** by
+
+1. calculating the coeficient of variation (CV) in read coverage along the
+length of each of the 1000 most highly expressed transcripts;
+2. calculating the median CV across these 1000 transcripts.
+
+A high CV of read coverage suggests possible 5' or 3' bias, or potentially
+non-uniform ("bumpy" or "spikey") coverage of a transcript. If 
+`medianCVcoverage` is high (> 1), this could indicate a more systemic problem
+with coverage in the dataset.
+
+```{r plot_med_cv_cov_shiny, echo=FALSE, cache=FALSE}
+# Skipping shiny version for now
+# sliderInput("covCutoff", "median CV coverage cutoff:", 
+#             min = 0, max = 3, step = 0.01,
+#             value = 1)
+
+# renderPlot({
+    yRange <- c(0, input$covCutoff)
+    xRange <- c(input$readsCutoff, max(metricSummary$fastqTotalReads) + 1e6)
+    
+    metricSummary %>%
+        plot_metric("medianCVcoverage", yRange, xRange)
+# })
+```
+
+***Median CV coverage:***  
+All libraries look good (with `medianCVcoverage` generally close to 0.5) in
+terms of gene coverage among the top 1000 transcripts.
+
+\  
+
+#### Examining read count data
+
+
+```{r raw_count_dists, echo=FALSE, fig.height=3.5}
+countDat %>% 
+    melt() %>% 
+    mutate(count = value,
+           libID = variable) %>% 
+    ggplot(aes(x = log2(count))) +
+    geom_density(aes(colour = libID), alpha = 0.2) +
+    theme_classic() +
+    scale_color_manual(values = colorRampPalette(colorblind_pal()(8))(16))
+```
+
+\  
+
+##### Gene filtering
+
+I used the function defined above to build the `DGEList` object for the data,
+which is the input for downstream functions.
+
+```{r build_dge_list}
+# Filter genes with (cpm > 10) in < 10% of samples
+dge = setUpDGEList(countData = countDat, geneData = geneDat,
+                      filterCount = 10, 
+                      filterPercentage = 0.20)
+```
+
+Keeping only those genes with >= 10 counts per million in at least 10% (
+`r 0.2 * nrow(groupDat)` samples), we're left with `r nrow(dge)` genes.
+
+```{r dge_count_dists, echo=FALSE, fig.height=3.5}
+dge$counts %>%
+    melt() %>% 
+    mutate(count = value,
+           libID = Var2) %>% 
+    ggplot(aes(x = log2(count))) +
+    geom_density(aes(colour = libID), alpha = 0.2) +
+    theme_classic() +
+    scale_color_manual(values = colorRampPalette(colorblind_pal()(8))(16))
+```
+
+\  
+
+##### Sanity check
+
+To verify the effect of the change I made to Elizabeth's code above, I plotted
+`norm.factors` and effective library size (`lib.size.eff`) under two 
+scenarios:
+
+* **preFilter:** `norm.factors` are calculated before genes are filtered
+* **postFilter:** `norm.factors` are calculated after genes are filtered and
+library sizes are updated
+
+```{r sanity_check, echo=FALSE}
+# pre-filter calculation of norm.factors
+d1 <- DGEList(countDat)
+d1 <- calcNormFactors(d1)
+
+# initialize data frame to store results from both scenarios
+normFactorTest <- d1$samples %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(test = "preFilter") %>% 
+    select(-group)
+
+# post-filter calculation of norm.factors
+filterCount <- 10
+filterPercentage <- 0.2
+d2 <- DGEList(countDat)
+keepRows <- rowSums(round(cpm(d2$counts)) >= filterCount) >= 
+    filterPercentage*ncol(countDat)
+d2 <- d2[keepRows, ]
+d2$samples$lib.size <- colSums(d2$counts)
+d2 <- calcNormFactors(d2)
+
+# update combined data frame
+normFactorTest <- d2$samples %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(test = "postFilter") %>% 
+    select(-group) %>% 
+    bind_rows(normFactorTest, .)
+
+# plot norm.factors and lib.size.eff for both scenarios
+normFactorTest %>% 
+    mutate(test = relevel(as.factor(test), "preFilter"),
+           lib.size.eff = norm.factors * lib.size) %>% 
+    melt(measure.vars = c("norm.factors", "lib.size.eff")) %>% 
+    ggplot(aes(x = libID, y = value)) +
+    geom_point(aes(fill = test), shape = 21, size = 3,
+               colour = "white", alpha = 0.7,
+               position = position_jitter(width = 0.1, height = 0)) +
+    facet_wrap(~ variable, scales = "free_y") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 90),
+          panel.grid.major = element_line(colour = "grey", linetype = 3)) +
+    scale_fill_colorblind()
+```
+
+For the not-too-stringent threshold used to filter genes (CPM > 10 in 20% of
+samples), the order of operations for calculating `norm.factors` appears to
+have minimal impact on effective library sizes.
+
+\  
+
+##### Gene annotation
+
+I used the **`biomaRt`** package to add gene symbols (from MGI) corresponding 
+to gene IDs from Ensembl.
+
+```{r annotate_genes}
+# Get MGI gene symbols corresponding to Ensembl Gene IDs
+dgeGeneDat <- dge$genes
+mart <- useMart(biomart = "ensembl", dataset = "mmusculus_gene_ensembl")
+ens2Gene <- getBM(attributes = c("ensembl_gene_id", "mgi_symbol"), 
+                  filters = "ensembl_gene_id", 
+                  values = dgeGeneDat$ensemblID, mart = mart)
+ens2Gene = ens2Gene[match(dgeGeneDat$ensemblID, ens2Gene$ensembl_gene_id), ]
+
+# Insert MGI gene symbols for genes in DGE object gene info
+dgeGeneDat <- dgeGeneDat %>% 
+    mutate(mgiSymbol = ens2Gene$mgi_symbol,
+           mgiSymbol = ifelse(is.na(mgiSymbol), "NA", mgiSymbol))
+
+dge$genes <- dgeGeneDat
+```
+
+\  
+
+##### Principal component analysis (PCA)
+
+I performed PCA with the `prcomp` function and plotted the first two principal
+components using the `autoplot` function from the **ggfortify** package.
+
+```{r pca, echo=FALSE}
+# Compute principal components
+pca <- prcomp(t(dge$counts))
+
+# Plot first two PCs and color by group
+autoplot(pca, data = groupDat, colour = 'group', label.size = 3, 
+         shape = FALSE) +
+    scale_color_colorblind() +
+    guides(size = FALSE)
+
+# Plot the percentage of std dev explained by each PC
+data_frame(pc = 1:length(pca$sdev), percSdev = pca$sdev / sum(pca$sdev)) %>% 
+    ggplot(aes(x = pc, y = percSdev)) +
+    geom_bar(stat = "identity", alpha = 0.8) +
+    theme_classic() +
+    scale_fill_colorblind()
+```
+
+Looking just at the long-term HSC populations, WT and BCAP knockout mice seem
+to cluster separately. When short-term populations are included, there is less
+distinction between knockout groups.
+
+\  
+
+##### Possible sources of confounding
+
+***Experimental, sequencing, and alignment variables plotted against the 1st
+principal component***
+
+```{r plot_pc1, echo=FALSE, fig.height=8}
+# Build data frame including design, metric, and other experimental variables
+confoundDat <- designDat %>% 
+    select(libID = lib_id, sort_date, age_in_weeks, ng_per_ul) %>% 
+    left_join(metricSummary, by = c("libID" = "libID")) %>% 
+    bind_cols(groupDat %>% select(-libID))
+
+# Include PC1 values with data frame of (potentially) confounding variables
+pc1Dat <- bind_cols(confoundDat, melt(pca$x[, 1], value.name = "pc1"))
+
+# Plot PC1 against all other variables
+pc1Dat %>% 
+    melt(measure.vars = setdiff(names(confoundDat), "libID")) %>%
+    ggplot(aes(x = value, y = pc1)) +
+    geom_point() +
+    facet_wrap(~ variable, nrow = 2, scales = "free_x") +
+    stat_smooth(aes(group = 1)) +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 90),
+          panel.grid.major = element_line(colour = "grey", linetype = 3)) +
+    scale_colour_colorblind()
+```
+
+\  
+
+##### Looking at BCAP counts
+
+```{r plot_bcap, echo=FALSE, fig.height=4.5}
+# Pull out raw counts for BCAP gene (Pik3ap1)
+bcapDat <- dge$counts[which(dge$genes$mgiSymbol == "Pik3ap1"), ] %>% 
+    melt(value.name = "count") %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(koStatus = groupDat$koStatus,
+           hscPop = groupDat$hscPop)
+
+# Plot BCAP counts by KO status and facet by HSC population
+bcapDat %>% 
+    ggplot(aes(x = koStatus, y = count)) +
+    geom_boxplot(aes(colour = koStatus), outlier.shape = NA) + 
+    geom_point(aes(fill = koStatus),
+                size = 3, alpha = 0.8, colour = "white", shape = 21) +
+    geom_text(aes(label = libID),
+                  hjust = -0.2, vjust = 1.2, size = 3) +
+    facet_wrap(~ hscPop) +
+    theme_classic() +
+    scale_color_colorblind() + 
+    scale_fill_colorblind()
+```
+
+-----  
+
+### Differential expression analysis
+
+#### Building models
+
+***Design 1:*** expression ~ `koStatus`
+
+```{r ko_voom_weights}
+# Define the design matrix, only including terms corresponding to KO status;
+# use voom to calculate transformed expression values
+koDesign <- model.matrix(~ koStatus, data = groupDat)
+koVoom <- voomWithQualityWeights(dge, design = koDesign,
+                                    plot = TRUE)
+```
+
+```{r ko_fit_model}
+# Fit model for the group design
+koFit <- lmFit(koVoom, koDesign)
+koFit <- eBayes(koFit)
+koResults <- topTable(koFit, number = nrow(dge))
+koResults %>% 
+    filter(mgiSymbol == "Pik3ap1")
+```
+
+\  
+
+***Design 2:*** expression ~ `koStatus` + `hscPop`
+
+```{r ko_hsc_voom_weights}
+# Define the design matrix, including terms corresponding to KO status and HSC
+# population; use voom to calculate transformed expression values
+koHscDesign <- model.matrix(~ koStatus + hscPop, data = groupDat)
+koHscVoom <- voomWithQualityWeights(dge, design = koHscDesign,
+                                    plot = TRUE)
+```
+
+```{r ko_hsc_fit_model}
+# Fit model for the group design
+koHscFit <- lmFit(koHscVoom, koHscDesign)
+koHscFit <- eBayes(koHscFit)
+koHscResults <- topTable(koHscFit, coef = 2, number = nrow(dge))
+koHscResults %>% 
+    filter(mgiSymbol == "Pik3ap1")
+```
+
+\  
+
+***Design 3:*** expression ~ `koStatus` * `hscPop` (i.e., 
+`koStatus` + `hscPop` + `koStatus`:`hscPop`)
+
+```{r ko_hsc_int_voom_weights}
+# Define the design matrix, including terms corresponding to KO status, HSC
+# population, and the interaction between the two variables; use voom to 
+# calculate transformed expression values
+koHscIntDesign <- model.matrix(~ koStatus * hscPop, data = groupDat)
+koHscIntVoom <- voomWithQualityWeights(dge, design = koHscIntDesign,
+                                    plot = TRUE)
+```
+
+```{r ko_hsc_int_fit_model}
+# Fit model for the group design
+koHscIntFit <- lmFit(koHscIntVoom, koHscIntDesign)
+koHscIntFit <- eBayes(koHscIntFit)
+koHscIntResults <- topTable(koHscIntFit, coef = 2, number = nrow(dge))
+koHscIntResults %>% 
+    filter(mgiSymbol == "Pik3ap1")
+```
+
+\  
+
+#### Model (design) comparison
+
+***Genes with significantly different expression (adj. p-value < 0.05) as a
+function of BCAP KO status:***
+
+```{r compare_models, echo=FALSE}
+koResults %>% 
+    filter(adj.P.Val < 0.05) %>% 
+    mutate(design = "design1") %>% 
+    bind_rows(koHscResults %>% 
+                  filter(adj.P.Val < 0.05) %>% 
+                  mutate(design = "design2")) %>% 
+    ggplot(aes(x = mgiSymbol, y = -log10(adj.P.Val))) +
+    geom_bar(aes(fill = design), stat = "identity",
+               alpha = 0.8, colour = "white") +
+    coord_flip() +
+    theme_classic() +
+    scale_color_colorblind() + 
+    scale_fill_colorblind()
+```
+
+----- 
+
+### Long-term HSC mice only
+
+```{r build_dge_list_long}
+# Get data for libraries from long-term HSC population
+groupDatLong <- groupDat %>% 
+    filter(hscPop == "long")
+countDatLong <- countDat[, names(countDat) %in% groupDatLong$libID]
+
+# Filter genes with (cpm > 10) in < 10% of samples
+dgeLong = setUpDGEList(countData = countDatLong, geneData = geneDat,
+                      filterCount = 10, 
+                      filterPercentage = 0.20)
+```
+
+\  
+
+##### Gene annotation
+
+```{r annotate_genes_long}
+# Get MGI gene symbols corresponding to Ensembl Gene IDs
+dgeLongGeneDat <- dgeLong$genes
+mart <- useMart(biomart = "ensembl", dataset = "mmusculus_gene_ensembl")
+ens2Gene <- getBM(attributes = c("ensembl_gene_id", "mgi_symbol"), 
+                  filters = "ensembl_gene_id", 
+                  values = dgeLongGeneDat$ensemblID, mart = mart)
+ens2Gene = ens2Gene[match(dgeLongGeneDat$ensemblID, ens2Gene$ensembl_gene_id), ]
+
+# Insert MGI gene symbols for genes in DGE object gene info
+dgeLongGeneDat <- dgeLongGeneDat %>% 
+    mutate(mgiSymbol = ens2Gene$mgi_symbol,
+           mgiSymbol = ifelse(is.na(mgiSymbol), "NA", mgiSymbol))
+
+dgeLong$genes <- dgeLongGeneDat
+```
+
+\  
+
+##### Principal component analysis (PCA)
+
+```{r pca_long, echo=FALSE}
+# Compute principal components
+pcaLong <- prcomp(t(dgeLong$counts))
+
+# Plot first two PCs and color by group
+autoplot(pcaLong, data = groupDatLong, colour = 'group', label.size = 3, 
+         shape = FALSE) +
+    scale_color_colorblind() +
+    guides(size = FALSE)
+
+# Plot the percentage of std dev explained by each PC
+data_frame(pc = 1:length(pcaLong$sdev), 
+           percSdev = pcaLong$sdev / sum(pcaLong$sdev)) %>% 
+    ggplot(aes(x = pc, y = percSdev)) +
+    geom_bar(stat = "identity", alpha = 0.8) +
+    theme_classic() +
+    scale_fill_colorblind()
+```
+
+Looking just at the long-term HSC populations, WT and BCAP knockout mice seem
+to cluster separately. When short-term populations are included, there is less
+distinction between knockout groups.
+
+\  
+
+##### Possible sources of confounding
+
+***Experimental, sequencing, and alignment variables plotted against the 1st
+principal component***
+
+```{r plot_pc1_long, echo=FALSE, fig.height=8}
+# Build data frame including design, metric, and other experimental variables
+confoundDatLong <- designDat %>% 
+    filter(lib_id %in% groupDatLong$libID) %>% 
+    select(libID = lib_id, sort_date, age_in_weeks, ng_per_ul) %>% 
+    left_join(metricSummary, by = c("libID" = "libID")) %>% 
+    bind_cols(groupDatLong %>% select(-libID))
+
+# Include PC1 values with data frame of (potentially) confounding variables
+pc1DatLong <- bind_cols(confoundDatLong, melt(pcaLong$x[, 1], value.name = "pc1"))
+
+# Plot PC1 against all other variables
+pc1DatLong %>% 
+    melt(measure.vars = setdiff(names(confoundDatLong), "libID")) %>%
+    ggplot(aes(x = value, y = pc1)) +
+    geom_point() +
+    facet_wrap(~ variable, nrow = 2, scales = "free_x") +
+    stat_smooth(aes(group = 1)) +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 90),
+          panel.grid.major = element_line(colour = "grey", linetype = 3)) +
+    scale_colour_colorblind()
+```
+
+\  
+
+##### Looking at BCAP counts
+
+```{r plot_bcap_long, echo=FALSE, fig.height=4.5}
+# Pull out raw counts for BCAP gene (Pik3ap1)
+bcapDatLong <- dgeLong$counts[which(dgeLong$genes$mgiSymbol == "Pik3ap1"), ] %>% 
+    melt(value.name = "count") %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(koStatus = groupDatLong$koStatus)
+
+# Plot BCAP counts by KO status and facet by HSC population
+bcapDatLong %>% 
+    ggplot(aes(x = koStatus, y = count)) +
+    geom_boxplot(aes(colour = koStatus), outlier.shape = NA) + 
+    geom_point(aes(fill = koStatus),
+                size = 3, alpha = 0.8, colour = "white", shape = 21) +
+    geom_text(aes(label = libID),
+                  hjust = -0.2, vjust = 1.2, size = 3) +
+    theme_classic() +
+    scale_color_colorblind() + 
+    scale_fill_colorblind()
+```
+
+\  
+
+#### Differential expression models
+
+***Design:*** expression ~ `koStatus`
+
+```{r ko_voom_weights_long}
+# Define the design matrix, only including terms corresponding to KO status;
+# use voom to calculate transformed expression values
+koDesignLong <- model.matrix(~ koStatus, data = groupDatLong)
+koVoomLong <- voomWithQualityWeights(dgeLong, design = koDesignLong,
+                                    plot = TRUE)
+```
+
+```{r ko_fit_model_long}
+# Fit model for the group design
+koFitLong <- lmFit(koVoomLong, koDesignLong)
+koFitLong <- eBayes(koFitLong)
+koResultsLong <- topTable(koFitLong, number = nrow(dgeLong))
+koResultsLong %>% 
+    filter(mgiSymbol == "Pik3ap1")
+
+koResultsLong %>% head()
+```
+
+\  
+
+### Short-term HSC mice only
+
+```{r build_dge_list_short}
+# Get data for libraries from long-term HSC population
+groupDatShort <- groupDat %>% 
+    filter(hscPop == "short")
+countDatShort <- countDat[, names(countDat) %in% groupDatShort$libID]
+
+# Filter genes with (cpm > 10) in < 10% of samples
+dgeShort = setUpDGEList(countData = countDatShort, geneData = geneDat,
+                      filterCount = 10, 
+                      filterPercentage = 0.20)
+```
+
+\  
+
+##### Gene annotation
+
+```{r annotate_genes_short}
+# Get MGI gene symbols corresponding to Ensembl Gene IDs
+dgeShortGeneDat <- dgeShort$genes
+mart <- useMart(biomart = "ensembl", dataset = "mmusculus_gene_ensembl")
+ens2Gene <- getBM(attributes = c("ensembl_gene_id", "mgi_symbol"), 
+                  filters = "ensembl_gene_id", 
+                  values = dgeShortGeneDat$ensemblID, mart = mart)
+ens2Gene = ens2Gene[match(dgeShortGeneDat$ensemblID, ens2Gene$ensembl_gene_id), ]
+
+# Insert MGI gene symbols for genes in DGE object gene info
+dgeShortGeneDat <- dgeShortGeneDat %>% 
+    mutate(mgiSymbol = ens2Gene$mgi_symbol,
+           mgiSymbol = ifelse(is.na(mgiSymbol), "NA", mgiSymbol))
+
+dgeShort$genes <- dgeShortGeneDat
+```
+
+\  
+
+##### Principal component analysis (PCA)
+
+```{r pca_short, echo=FALSE}
+# Compute principal components
+pcaShort <- prcomp(t(dgeShort$counts))
+
+# Plot first two PCs and color by group
+autoplot(pcaShort, data = groupDatShort, colour = 'group', label.size = 3, 
+         shape = FALSE) +
+    scale_color_colorblind() +
+    guides(size = FALSE)
+
+# Plot the percentage of std dev explained by each PC
+data_frame(pc = 1:length(pcaShort$sdev), 
+           percSdev = pcaShort$sdev / sum(pcaShort$sdev)) %>% 
+    ggplot(aes(x = pc, y = percSdev)) +
+    geom_bar(stat = "identity", alpha = 0.8) +
+    theme_classic() +
+    scale_fill_colorblind()
+```
+
+Looking just at the long-term HSC populations, WT and BCAP knockout mice seem
+to cluster separately. When short-term populations are included, there is less
+distinction between knockout groups.
+
+\  
+
+##### Possible sources of confounding
+
+***Experimental, sequencing, and alignment variables plotted against the 1st
+principal component***
+
+```{r plot_pc1_short, echo=FALSE, fig.height=8}
+# Build data frame including design, metric, and other experimental variables
+confoundDatShort <- designDat %>% 
+    filter(lib_id %in% groupDatShort$libID) %>% 
+    select(libID = lib_id, sort_date, age_in_weeks, ng_per_ul) %>% 
+    left_join(metricSummary, by = c("libID" = "libID")) %>% 
+    bind_cols(groupDatShort %>% select(-libID))
+
+# Include PC1 values with data frame of (potentially) confounding variables
+pc1DatShort <- bind_cols(confoundDatShort, melt(pcaShort$x[, 1], value.name = "pc1"))
+
+# Plot PC1 against all other variables
+pc1DatShort %>% 
+    melt(measure.vars = setdiff(names(confoundDatShort), "libID")) %>%
+    ggplot(aes(x = value, y = pc1)) +
+    geom_point() +
+    facet_wrap(~ variable, nrow = 2, scales = "free_x") +
+    stat_smooth(aes(group = 1)) +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 90),
+          panel.grid.major = element_line(colour = "grey", linetype = 3)) +
+    scale_colour_colorblind()
+```
+
+\  
+
+##### Looking at BCAP counts
+
+```{r plot_bcap_short, echo=FALSE, fig.height=4.5}
+# Pull out raw counts for BCAP gene (Pik3ap1)
+bcapDatShort <- dgeShort$counts[which(dgeShort$genes$mgiSymbol == "Pik3ap1"), ] %>% 
+    melt(value.name = "count") %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(koStatus = groupDatShort$koStatus)
+
+# Plot BCAP counts by KO status and facet by HSC population
+bcapDatShort %>% 
+    ggplot(aes(x = koStatus, y = count)) +
+    geom_boxplot(aes(colour = koStatus), outlier.shape = NA) + 
+    geom_point(aes(fill = koStatus),
+                size = 3, alpha = 0.8, colour = "white", shape = 21) +
+    geom_text(aes(label = libID),
+                  hjust = -0.2, vjust = 1.2, size = 3) +
+    theme_classic() +
+    scale_color_colorblind() + 
+    scale_fill_colorblind()
+```
+
+\  
+
+#### Differential expression models
+
+***Design:*** expression ~ `koStatus`
+
+```{r ko_voom_weights_short}
+# Define the design matrix, only including terms corresponding to KO status;
+# use voom to calculate transformed expression values
+koDesignShort <- model.matrix(~ koStatus, data = groupDatShort)
+koVoomShort <- voomWithQualityWeights(dgeShort, design = koDesignShort,
+                                    plot = TRUE)
+```
+
+```{r ko_fit_model_short}
+# Fit model for the group design
+koFitShort <- lmFit(koVoomShort, koDesignShort)
+koFitShort <- eBayes(koFitShort)
+koResultsShort <- topTable(koFitShort, number = nrow(dgeShort))
+koResultsShort %>% 
+    filter(mgiSymbol == "Pik3ap1")
+
+koResultsShort %>% head()
+```
+
+\  
+
+##### Looking at BCAP counts again...
+
+```{r plot_bcap_short, echo=FALSE, fig.height=4.5}
+# Pull out raw counts for BCAP gene (Pik3ap1)
+bcapIdx <- which(koVoom$genes$mgiSymbol == "Pik3ap1")
+bcapIdxLong <- which(koVoomLong$genes$mgiSymbol == "Pik3ap1")
+bcapIdxShort <- which(koVoomShort$genes$mgiSymbol == "Pik3ap1")
+
+bcapDatAll <- (koVoom$E[bcapIdx, ] * koVoom$weights[bcapIdx, ]) %>% 
+    melt(value.name = "count") %>% 
+    add_rownames(var = "libID") %>% 
+    mutate(koStatus = groupDat$koStatus,
+           hscPop = groupDat$hscPop,
+           samples = "all") %>% 
+    bind_rows((koVoomShort$E[bcapIdxShort, ] * koVoomShort$weights[bcapIdxShort, ]) %>% 
+                  melt(value.name = "count") %>% 
+                  add_rownames(var = "libID") %>% 
+                  mutate(koStatus = groupDatShort$koStatus,
+                         hscPop = groupDatShort$hscPop,
+                         samples = "short")) %>% 
+    bind_rows((koVoomLong$E[bcapIdxLong, ] * koVoomLong$weights[bcapIdxLong, ]) %>% 
+                  melt(value.name = "count") %>% 
+                  add_rownames(var = "libID") %>% 
+                  mutate(koStatus = groupDatLong$koStatus,
+                         hscPop = groupDatLong$hscPop,
+                         samples = "long"))
+
+# Plot BCAP counts by KO status and facet by HSC population
+bcapDatAll %>% 
+    ggplot(aes(x = koStatus, y = count)) +
+    geom_boxplot(aes(colour = koStatus), outlier.shape = NA) + 
+    geom_point(aes(fill = koStatus, shape = hscPop),
+                size = 3, alpha = 0.8, colour = "slategray") +
+    geom_text(aes(label = libID),
+                  hjust = -0.2, vjust = 1.2, size = 3) +
+    facet_wrap(~ samples) +
+    theme_classic() +
+    scale_color_colorblind() + 
+    scale_fill_colorblind() +
+    scale_shape_manual(values = c(21, 22))
+```

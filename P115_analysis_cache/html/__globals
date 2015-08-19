@@ -1,0 +1,42 @@
+whalen_functions	>=	$	$<-	calcNormFactors	colSums	cpm	DGEList	ncol	print	return	round	rowSums	table
+load_data	read_csv	read_excel
+clean_data	!	[<-	%>%	$	data_frame	filter	geneName	is.na	lib_id	make.unique	mutate	names	names<-	select	str_extract	str_replace	str_replace_all	str_to_lower
+get_groups	%>%	as.factor	designDat	group	hsc_population	hscPop	koStatus	lib_id	mutate	sample_name	select	str_c	str_extract	tolower
+summarize_metrics	%>%	fastq_total_reads	lib_id	mapped_reads_w_dups	median_cv_coverage	metricDat	mutate	percentDuplication	select	unpaired_read_duplicates	unpaired_reads_examined
+raw_count_dists	%>%	aes	colorblind_pal	colorRampPalette	count	countDat	geom_density	ggplot	libID	log2	melt	mutate	scale_color_manual	theme_classic	value	variable
+build_dge_list	countDat	geneDat	setUpDGEList
+dge_count_dists	%>%	$	aes	colorblind_pal	colorRampPalette	count	dge	geom_density	ggplot	libID	log2	melt	mutate	scale_color_manual	theme_classic	value	Var2
+sanity_check	.	%>%	>=	~	$	$<-	add_rownames	aes	as.factor	bind_rows	c	calcNormFactors	colSums	countDat	cpm	DGEList	element_line	element_text	facet_wrap	geom_point	ggplot	group	lib.size	libID	melt	mutate	ncol	norm.factors	position_jitter	relevel	round	rowSums	scale_fill_colorblind	select	test	theme	theme_classic	value
+annotate_genes	%>%	$	$<-	c	getBM	ifelse	is.na	match	mgiSymbol	mutate	useMart
+pca	%>%	$	aes	autoplot	data_frame	dge	geom_bar	ggplot	groupDat	guides	length	pc	percSdev	prcomp	scale_color_colorblind	scale_fill_colorblind	sum	t	theme_classic
+plot_pc1	%>%	~	$	aes	age_in_weeks	bind_cols	c	designDat	element_line	element_text	facet_wrap	geom_point	ggplot	groupDat	left_join	lib_id	libID	melt	metricSummary	names	ng_per_ul	pc1	pca	scale_colour_colorblind	select	setdiff	sort_date	stat_smooth	theme	theme_classic	value
+plot_bcap	%>%	==	~	$	add_rownames	aes	count	dge	facet_wrap	geom_boxplot	geom_point	geom_text	ggplot	groupDat	koStatus	libID	melt	mutate	scale_color_colorblind	scale_fill_colorblind	theme_classic	which
+ko_voom_weights	~	dge	groupDat	model.matrix	voomWithQualityWeights
+plot_bcap_voom	%>%	==	~	$	add_rownames	aes	facet_wrap	geom_boxplot	geom_point	geom_text	ggplot	groupDat	koStatus	koVoom	libID	log2_expression	melt	mutate	scale_color_colorblind	scale_fill_colorblind	theme_classic	which
+ko_fit_model	%>%	==	dge	eBayes	filter	koDesign	koVoom	lmFit	mgiSymbol	nrow	topTable
+exclude_lib7418	%>%	==	~	$	$<-	add_rownames	aes	c	count	countDat	facet_wrap	geneDat	geom_boxplot	geom_point	geom_text	getBM	ggplot	groupDat	ifelse	is.na	koStatus	libID	match	melt	mgiSymbol	model.matrix	mutate	scale_color_colorblind	scale_fill_colorblind	setUpDGEList	theme_classic	useMart	which
+unnamed-chunk-1	%>%	==	~	$	add_rownames	aes	dge2	facet_wrap	geom_boxplot	geom_point	geom_text	ggplot	groupDat	koDesign2	koStatus	libID	log2_expression	melt	mutate	scale_color_colorblind	scale_fill_colorblind	theme_classic	voomWithQualityWeights	which
+ko_fit_model_noLib7418	%>%	==	dge2	eBayes	filter	koDesign2	koVoom2	lmFit	mgiSymbol	nrow	topTable
+ko_voom_weights_noLib7418	dge2	koDesign2	voomWithQualityWeights
+ko_hsc_voom_weights	~	dge	groupDat	model.matrix	voomWithQualityWeights
+ko__hsc_fit_model	%>%	==	dge	eBayes	filter	koDesign3	koVoom3	lmFit	mgiSymbol	nrow	topTable
+ko_hsc_fit_model	%>%	==	dge	eBayes	filter	koHscDesign	koHscVoom	lmFit	mgiSymbol	nrow	topTable
+ko_hsc_voom_weights_noLib7418	~	dge2	groupDat	model.matrix	voomWithQualityWeights
+ko_hsc_fit_model_noLib7418	%>%	==	dge2	eBayes	filter	koDesign4	koVoom4	lmFit	mgiSymbol	nrow	topTable
+ko_hsc_int_voom_weights	~	dge	groupDat	model.matrix	voomWithQualityWeights
+ko_hsc_int_fit_model	%>%	==	dge	eBayes	filter	koHscIntDesign	koHscIntVoom	lmFit	mgiSymbol	nrow	topTable
+compare_models	%>%	<	adj.P.Val	aes	bind_rows	coord_flip	design	filter	geom_bar	ggplot	koHscResults	koResults	log10	mgiSymbol	mutate	scale_color_colorblind	scale_fill_colorblind	theme_classic
+build_dge_list_long	%>%	==	$	countDat	filter	geneDat	groupDat	hscPop	names	setUpDGEList
+annotate_genes_long	%>%	$	$<-	c	getBM	ifelse	is.na	match	mgiSymbol	mutate	useMart
+pca_long	%>%	$	aes	autoplot	data_frame	dgeLong	geom_bar	ggplot	groupDatLong	guides	length	pc	percSdev	prcomp	scale_color_colorblind	scale_fill_colorblind	sum	t	theme_classic
+plot_pc1_long	%>%	~	$	aes	age_in_weeks	bind_cols	c	designDat	element_line	element_text	facet_wrap	filter	geom_point	ggplot	groupDatLong	left_join	lib_id	libID	melt	metricSummary	names	ng_per_ul	pc1	pcaLong	scale_colour_colorblind	select	setdiff	sort_date	stat_smooth	theme	theme_classic	value
+plot_bcap_long	%>%	==	$	add_rownames	aes	count	dgeLong	geom_boxplot	geom_point	geom_text	ggplot	groupDatLong	koStatus	libID	melt	mutate	scale_color_colorblind	scale_fill_colorblind	theme_classic	which
+ko_voom_weights_long	~	dgeLong	groupDatLong	model.matrix	voomWithQualityWeights
+ko_fit_model_long	%>%	==	dgeLong	eBayes	filter	head	koDesignLong	koVoomLong	lmFit	mgiSymbol	nrow	topTable
+build_dge_list_short	%>%	==	$	countDat	filter	geneDat	groupDat	hscPop	names	setUpDGEList
+annotate_genes_short	%>%	$	$<-	c	getBM	ifelse	is.na	match	mgiSymbol	mutate	useMart
+pca_short	%>%	$	aes	autoplot	data_frame	dgeShort	geom_bar	ggplot	groupDatShort	guides	length	pc	percSdev	prcomp	scale_color_colorblind	scale_fill_colorblind	sum	t	theme_classic
+plot_pc1_short	%>%	~	$	aes	age_in_weeks	bind_cols	c	designDat	element_line	element_text	facet_wrap	filter	geom_point	ggplot	groupDatShort	left_join	lib_id	libID	melt	metricSummary	names	ng_per_ul	pc1	pcaShort	scale_colour_colorblind	select	setdiff	sort_date	stat_smooth	theme	theme_classic	value
+plot_bcap_short	%>%	==	$	add_rownames	aes	count	dgeShort	geom_boxplot	geom_point	geom_text	ggplot	groupDatShort	koStatus	libID	melt	mutate	scale_color_colorblind	scale_fill_colorblind	theme_classic	which
+ko_voom_weights_short	~	dgeShort	groupDatShort	model.matrix	voomWithQualityWeights
+ko_fit_model_short	%>%	==	dgeShort	eBayes	filter	head	koDesignShort	koVoomShort	lmFit	mgiSymbol	nrow	topTable

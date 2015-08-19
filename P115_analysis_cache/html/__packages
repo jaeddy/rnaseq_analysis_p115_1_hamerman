@@ -1,0 +1,16 @@
+base
+limma
+edgeR
+biomaRt
+scales
+proto
+ggplot2
+ggfortify
+dplyr
+ggthemes
+stringr
+readr
+readxl
+reshape2
+knitr
+shiny
