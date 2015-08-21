@@ -15,5 +15,5 @@ vignettes/*.pdf
 packrat/lib*/
 
 # Rmarkdown cache
-P115_analysis_cache/
+P115_analysis_cache
 
