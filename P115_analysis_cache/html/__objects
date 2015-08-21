@@ -10,7 +10,7 @@ sanity_check	d1	d2	filterCount	filterPercentage	keepRows	normFactorTest
 annotate_genes	dge	dgeGeneDat	ens2Gene	mart
 pca	pca
 plot_pc1	confoundDat	pc1Dat
-plot_bcap	bcapDat
+plot_bcap	bcapDatAll	bcapIdx
 ko_voom_weights	koDesign	koVoom
 plot_bcap_voom	bcapDat
 ko_fit_model	koFit	koResults
@@ -25,18 +25,18 @@ ko_hsc_voom_weights_noLib7418	koDesign4	koVoom4
 ko_hsc_fit_model_noLib7418	koFit4	koResults4
 ko_hsc_int_voom_weights	koHscIntDesign	koHscIntVoom
 ko_hsc_int_fit_model	koHscIntFit	koHscIntResults
-compare_models	
+compare_models	geneLevels	sigGeneDat
 build_dge_list_long	countDatLong	dgeLong	groupDatLong
 annotate_genes_long	dgeLong	dgeLongGeneDat	ens2Gene	mart
 pca_long	pcaLong
-plot_pc1_long	confoundDatLong	pc1DatLong
+plot_pc1_long	confoundDatLong
 plot_bcap_long	bcapDatLong
 ko_voom_weights_long	koDesignLong	koVoomLong
 ko_fit_model_long	koFitLong	koResultsLong
 build_dge_list_short	countDatShort	dgeShort	groupDatShort
 annotate_genes_short	dgeShort	dgeShortGeneDat	ens2Gene	mart
 pca_short	pcaShort
-plot_pc1_short	confoundDatShort	pc1DatShort
+plot_pc1_short	confoundDatShort
 plot_bcap_short	bcapDatShort
 ko_voom_weights_short	koDesignShort	koVoomShort
 ko_fit_model_short	koFitShort	koResultsShort
@@ -44,3 +44,13 @@ plot_bcap_fits	bcapDatAll	bcapHscIdx	bcapIdx	bcapIdxLong	bcapIdxShort
 dge_cpm_dists	
 plot_dim1	confoundDat	dimDat
 plot_pc2	confoundDat	pc2Dat
+pca_extra	p1	p2	p3	p4
+plot_ko_status	
+sva	koSva
+ko_hsc_conc_voom_weights	koHscConcDesign	koHscConcVoom
+ko_hsc_conc_fit_model	koHscConcFit	koHscConcResults
+ko_hsc_conc_voom_weights_noqual	koHscConcVoomNoQual
+ko_hsc_conc_fit_mode_noquall	koHscConcNoQualFit	koHscConcNoQualResults
+session_info	
+rna_conc_plot	
+ko_hsc_conc_fit_mode_noqual	koHscConcNoQualFit	koHscConcNoQualResults

@@ -1,11 +1,12 @@
 ---
 title: "P115-1 Analysis"
 author: "James Eddy"
-date: "July 31, 2015"
+date: "August 21, 2015"
 output: 
   html_document: 
     css: custom.css
     highlight: pygments
+    number_sections: yes
 ---
 
 ```{r global_opts, echo=FALSE, cache=FALSE}
@@ -19,9 +20,9 @@ knitr::opts_chunk$set(fig.width=8, fig.height=4, fig.align='center',
 options(scipen = 1, digits = 2)
 ```
 
-### R environment set-up
+# R environment set-up
 
-#### Loading packages
+## Loading packages
 
 I first loaded required packages for data munging, visualization, and 
 analysis (these are largely Hadley Wickham libraries, plus some 
@@ -55,7 +56,7 @@ library(shiny)
 
 \  
 
-#### Defining functions
+## Defining functions
 
 Functions for plotting metrics are contained in `metric_qc_functions.R`.
 
@@ -101,7 +102,7 @@ setUpDGEList <- function(countData, geneData = NULL,
 
 \  
 
-#### Loading data
+## Loading data
 
 Next, I read counts and metrics data for the project into R, along with sample
 annotation for project libraries.
@@ -125,7 +126,7 @@ designDat <- read_excel(designFile, skip = 1) # 36 obs. of 18 variables
 
 \  
 
-#### Cleaning data
+## Cleaning data
 
 I needed to do a bit of cleaning/formatting with variable names (column 
 headers) to make life easier and avoid breaking downstream functions.
@@ -187,9 +188,9 @@ For reference, here are the relevant groups in the data (stored in `groupDat`):
 
 -----
 
-### Inspecting data
+# Inspecting data
 
-#### Metric plotting & QC
+## Metric plotting & QC
 
 Next, I looked at a few standard metrics to see whether any libraries should
 be excluded due to quality reasons.
@@ -219,7 +220,7 @@ the x- and y-axis; dashed lines indicate outlier limits (1.5*IQR).
 
 \  
 
-##### Percent aligned
+### Percent aligned
 
 Percent aligned is simply the number of FASTQ reads for which there is a
 corresponding alignment in the **`TopHat`** BAM file. In other words,
@@ -264,7 +265,7 @@ only `r filter(metricSummary, libID == "lib7418") %>% select(fastqTotalReads) /
 
 \  
 
-##### Median CV coverage
+### Median CV coverage
 
 Median CV coverage is calculated by **`Picard`** by
 
@@ -298,7 +299,7 @@ terms of gene coverage among the top 1000 transcripts.
 
 \  
 
-#### Examining read count data
+## Examining read count data
 
 I plotted the (smoothed) frequency of log-normalized counts in each library,
 just to get a sense of the distribution.
@@ -322,7 +323,7 @@ number of pre-aligned reads).
 
 \  
 
-##### Gene filtering
+### Gene filtering
 
 I used the function defined above to build the `DGEList` object for the data,
 which is the input for downstream functions.
@@ -334,7 +335,7 @@ dge = setUpDGEList(countData = countDat, geneData = geneDat,
                       filterPercentage = 0.20)
 ```
 
-Keeping only those genes with >= 10 counts per million in at least 10% (
+Keeping only those genes with >= 10 counts per million in at least 20% (
 `r 0.2 * nrow(groupDat)` samples), we're left with `r nrow(dge)` genes.
 
 ```{r dge_count_dists, echo=FALSE, fig.height=3.5}
@@ -368,7 +369,7 @@ more similar across all libraries, including **lib7418**.
 
 \  
 
-##### Checking code edits
+### Checking code edits
 
 To verify the effect of the change I made to Elizabeth's code above, I plotted
 `norm.factors` and effective library size (`lib.size.eff`) under two 
@@ -428,7 +429,7 @@ have minimal impact on effective library sizes.
 
 \  
 
-##### Gene annotation
+### Gene annotation
 
 I used the **`biomaRt`** package to add gene symbols (from MGI) corresponding 
 to gene IDs from Ensembl.
@@ -452,7 +453,7 @@ dge$genes <- dgeGeneDat
 
 \  
 
-##### Principal component analysis (PCA)
+### Principal component analysis (PCA)
 
 I performed PCA (on log-normalized CPM values) with the `prcomp` function and 
 plotted the first two principal components using the `ggbiplot` function from 
@@ -467,11 +468,13 @@ ggbiplot(pca, choices = c(1,2), var.axes = FALSE,
          groups = groupDat$group, labels = groupDat$libID, labels.size = 3) +
     scale_color_colorblind() +
     guides(size = FALSE) +
-    theme_classic()
+    theme_classic() +
+    theme(axis.title = element_text(size = 11))
 
 # Plot the percentage of std dev explained by each PC
-data_frame(pc = 1:length(pca$sdev), percSdev = pca$sdev / sum(pca$sdev)) %>% 
-    ggplot(aes(x = pc, y = percSdev)) +
+data_frame(pc = 1:length(pca$sdev), 
+           percVariance = pca$sdev^2 / sum(pca$sdev^2)) %>% 
+    ggplot(aes(x = pc, y = percVariance)) +
     geom_bar(stat = "identity", alpha = 0.8) +
     theme_classic() +
     scale_fill_colorblind()
@@ -485,31 +488,35 @@ experimental group or any of the metrics I examined above.
 Among the first two principal components, there is no clear clustering by
 KO status.
 
-```{r pca_extra, echo=FALSE}
+```{r pca_extra, echo=FALSE, fig.height=6}
 # Plot other combinations of PCs
 p1 <- ggbiplot(pca, choices = c(1,3), var.axes = FALSE,
                groups = groupDat$group, labels = groupDat$libID, labels.size = 3) +
     scale_color_colorblind() +
     guides(size = FALSE) +
-    theme_classic()
+    theme_classic() +
+    theme(axis.title = element_text(size = 9))
 
 p2 <- ggbiplot(pca, choices = c(2,3), var.axes = FALSE,
                groups = groupDat$group, labels = groupDat$libID, labels.size = 3) +
     scale_color_colorblind() +
     guides(size = FALSE) +
-    theme_classic()
+    theme_classic() +
+    theme(axis.title = element_text(size = 9))
 
 p3 <- ggbiplot(pca, choices = c(1,4), var.axes = FALSE,
                groups = groupDat$group, labels = groupDat$libID, labels.size = 3) +
     scale_color_colorblind() +
     guides(size = FALSE) +
-    theme_classic()
+    theme_classic() +
+    theme(axis.title = element_text(size = 9))
 
 p4 <- ggbiplot(pca, choices = c(2,4), var.axes = FALSE,
                groups = groupDat$group, labels = groupDat$libID, labels.size = 3) +
     scale_color_colorblind() +
     guides(size = FALSE) +
-    theme_classic()
+    theme_classic() +
+    theme(axis.title = element_text(size = 9))
 
 plot_grid(p1, p2, p3, p4)
 ```
@@ -522,7 +529,7 @@ relationship with PC2.
 
 \  
 
-##### Possible sources of confounding
+### Possible sources of confounding
 
 To try to get a better sense of what PC1 might represent in the data, I plotted
 several experimental, sequencing, and alignment variables against PC1 values.
@@ -559,14 +566,14 @@ particularly associated with PC1.
 
 I also plotted the same set of variables against `koStatus`.
 
-```{r plot_ko_status, echo=FALSE, fig.height=8}
+```{r plot_ko_status, echo=FALSE, fig.height=7}
 # Plot PC1 against all other variables
 confoundDat %>% 
     melt(measure.vars = setdiff(names(confoundDat), 
                                 c("libID", "koStatus"))) %>%
     ggplot(aes(x = koStatus, y = value)) +
     geom_point() +
-    facet_wrap(~ variable, nrow = 2, scales = "free_y") +
+    facet_wrap(~ variable, nrow = 3, scales = "free_y") +
     stat_smooth(aes(group = 1)) +
     theme_classic() +
     theme(axis.text.x = element_text(angle = 90),
@@ -586,9 +593,9 @@ metrics appear to be particularly skewed by `koStatus`.
 
 -----  
 
-### Differential expression analysis
+# Differential expression analysis
 
-#### Building models
+## Building models
 
 ***Design 1:*** expression ~ `koStatus`
 
@@ -615,18 +622,20 @@ koFit <- eBayes(koFit)
 koResults <- topTable(koFit, number = nrow(dge))
 ```
 
-This model produces `nrow(koResults %>% filter(adj.P.Val < 0.05))` significant 
+This model produces `r nrow(koResults %>% filter(adj.P.Val < 0.05))` significant 
 genes:
-`kable(koResults %>% filter(adj.P.Val < 0.05), format = "html")`
+`r kable(koResults %>% filter(adj.P.Val < 0.05), digits = 3, format = "html")`
 
 `logFC` in this table represents the log fold-change in expression per unit
 change in `koStatus` (in other words, the log FC in wild-type relative to KO).
 
-##### A note about BCAP
+\  
+
+### A note about BCAP
 
 Interestingly, the gene for BCAP (i.e., the knock-out target), **Pik3ap1**, is
 not significant after multiple testing correction:
-`kable(koResults %>% filter(mgiSymbol == "Pik3ap1"), format = "html")`
+`r kable(koResults %>% filter(mgiSymbol == "Pik3ap1"), digits = 3, format = "html")`
 
 Based on previous inspection of the aligned data in **`IGV`**, the knockout of
 BCAP does not manifest entirely cleanly on the RNA level. As seen in the plots
@@ -703,14 +712,18 @@ results for the 2nd model coefficient (1st coefficient is the intercept), we
 can interpret `logFC` in the table below as the log FC in expression in WT
 relative to KO mice, when all other parameters are held constant.
 
-This model produces `nrow(koHscResults %>% filter(adj.P.Val < 0.05))` 
+This model produces `r nrow(koHscResults %>% filter(adj.P.Val < 0.05))` 
 significant genes for `koStatus`:
-`kable(koHscResults %>% filter(adj.P.Val < 0.05), format = "html")`
+`r kable(koHscResults %>% filter(adj.P.Val < 0.05), digits = 3, format = "html")`
 
-**Pik3ap1**, is still not significant after multiple testing correction:
-`kable(koHscResults %>% filter(mgiSymbol == "Pik3ap1"), format = "html")`
+\  
 
-##### Surrogate variable analysis (SVA)
+**Pik3ap1** is still not significant after multiple testing correction:
+`r kable(koHscResults %>% filter(mgiSymbol == "Pik3ap1"), digits = 3, format = "html")`
+
+\  
+
+### Surrogate variable analysis (SVA)
 
 To dig a bit further into PC1 / `ng_per_ul`, which might be introducing
 unwanted noise into the model, I identified surrogate variables using
@@ -727,12 +740,14 @@ weights all appear to be correlated with RNA concentration (`ng_per_ul`).
 
 ```{r sva}
 koSva <- sva(koHscVoom$E, koHscVoom$design)
+```
 
+```{r rna_conc_plot, echo=FALSE, fig.height=3.5}
 data_frame(pc1 = pca$x[, 1], sv1 = koSva$sv[, 1], 
-           voomQWts = koHscVoom$sample.weights,
+           voomQualWts = koHscVoom$sample.weights,
            rnaConc = confoundDat$ng_per_ul) %>% 
     melt(measure.vars = c("sv1", "pc1", "voomQualWts")) %>% 
-    ggplot(aes(x = conc, y = value)) +
+    ggplot(aes(x = rnaConc, y = value)) +
     geom_point() +
     stat_smooth(method = "lm") +
     facet_wrap(~ variable, scales = "free_y")
@@ -746,8 +761,9 @@ To control for RNA concentration, I added the `ng_per_ul` as a parameter in the
 model.
 
 ```{r ko_hsc_conc_voom_weights}
-# Define the design matrix, including terms corresponding to KO status and HSC
-# population; use voom to calculate transformed expression values
+# Define the design matrix, including terms corresponding to KO status, HSC
+# population, and RNA concentration; use voom to calculate transformed 
+# expression values
 koHscConcDesign <- model.matrix(~ koStatus + hscPop + ng_per_ul, 
                                 data = confoundDat)
 koHscConcVoom <- voomWithQualityWeights(dge, design = koHscDesign,
@@ -765,12 +781,14 @@ koHscConcFit <- eBayes(koHscConcFit)
 koHscConcResults <- topTable(koHscConcFit, coef = 2, number = nrow(dge))
 ```
 
-This new model produces `nrow(koHscConcResults %>% filter(adj.P.Val < 0.05))` 
+This new model produces `r nrow(koHscConcResults %>% filter(adj.P.Val < 0.05))` 
 significant genes for `koStatus`:
-`kable(koHscConcResults %>% filter(adj.P.Val < 0.05), format = "html")`
+`r kable(koHscConcResults %>% filter(adj.P.Val < 0.05), digits = 3, format = "html")`
 
-**Pik3ap1**, is still not significant after multiple testing correction:
-`kable(koHscConcResults %>% filter(mgiSymbol == "Pik3ap1"), format = "html")`
+\  
+
+**Pik3ap1** is still not significant after multiple testing correction:
+`kable(koHscConcResults %>% filter(mgiSymbol == "Pik3ap1"), digits = 3, format = "html")`
 
 \  
 
@@ -783,13 +801,13 @@ quality weights from `voom` - I opted to train an additional model without the
 quality weighting.
 
 ```{r ko_hsc_conc_voom_weights_noqual}
-# Define the design matrix, including terms corresponding to KO status and HSC
-# population; use voom to calculate transformed expression values
-koHscConcVoomNoQual <- voom(dge, design = koHscDesign,
-                                    plot = TRUE)
+# Define the design matrix, including terms corresponding to KO status, HSC
+# population, and RNA concentration; use voom to calculate transformed 
+# expression values
+koHscConcVoomNoQual <- voom(dge, design = koHscDesign, plot = TRUE)
 ```
 
-```{r ko_hsc_conc_fit_model}
+```{r ko_hsc_conc_fit_mode_noqual}
 # Fit model for the group design
 koHscConcNoQualFit <- lmFit(koHscConcVoomNoQual, koHscConcDesign)
 koHscConcNoQualFit <- eBayes(koHscConcNoQualFit)
@@ -797,12 +815,14 @@ koHscConcNoQualResults <- topTable(koHscConcNoQualFit, coef = 2, number = nrow(d
 ```
 
 This new model produces 
-`nrow(koHscConcNoQualResults %>% filter(adj.P.Val < 0.05))` 
+`r nrow(koHscConcNoQualResults %>% filter(adj.P.Val < 0.05))` 
 significant genes for `koStatus`:
-`kable(koHscConcNoQualResults %>% filter(adj.P.Val < 0.05), format = "html")`
+`r kable(koHscConcNoQualResults %>% filter(adj.P.Val < 0.05), digits = 3, format = "html")`
 
-**Pik3ap1**, is borderline significant after multiple testing correction:
-`kable(koHscConcNoQualResults %>% filter(mgiSymbol == "Pik3ap1"), format = "html")`
+\  
+
+**Pik3ap1** is borderline significant after multiple testing correction:
+`r kable(koHscConcNoQualResults %>% filter(mgiSymbol == "Pik3ap1"), digits = 3, format = "html")`
 
 While, for the reasons stated above, differential BCAP expression should 
 probably not be viewed as a positive control, it's at least somewhat 
@@ -810,12 +830,20 @@ encouraging to see the model better account for this difference.
 
 \  
 
-#### Model (design) comparison
+## Model (design) comparison
+
+The plot below shows the full list of genes that were found to be significant
+with one or more of the above model designs. For each gene, a colored bar
+indicates the design under which it was found to be significant (the size of
+the bar is scaled by the adjusted p-value).
+
+The gene lists for designs 1 and 2 overlap completely with designs 3 and 3.5;
+there were 4 genes from design 3 that were not significant in design 3.5.
 
 ***Genes with significantly different expression (adj. p-value < 0.05) as a
 function of BCAP KO status:***
 
-```{r compare_models, echo=FALSE}
+```{r compare_models, echo=FALSE, fig.width=9.5, fig.height=5}
 sigGeneDat <- koResults %>% 
     filter(adj.P.Val < 0.05) %>% 
     mutate(design = "design1") %>% 
@@ -827,36 +855,40 @@ sigGeneDat <- koResults %>%
                   mutate(design = "design3")) %>% 
     bind_rows(koHscConcNoQualResults %>% 
                   filter(adj.P.Val < 0.05) %>% 
-                  mutate(design = "design4"))
+                  mutate(design = "design3.5")) %>% 
+    mutate(geneID_symbol = str_c(str_extract(ensemblID, "[1-9].*"), 
+                                 mgiSymbol, sep = "_"))
 
-koResults %>% 
-    filter(adj.P.Val < 0.05) %>% 
-    mutate(design = "design1") %>% 
-    bind_rows(koHscResults %>% 
-                  filter(adj.P.Val < 0.05) %>% 
-                  mutate(design = "design2")) %>% 
-    bind_rows(koHscConcResults %>% 
-                  filter(adj.P.Val < 0.05) %>% 
-                  mutate(design = "design3")) %>% 
-    bind_rows(koHscConcNoQualResults %>% 
-                  filter(adj.P.Val < 0.05) %>% 
-                  mutate(design = "design4")) %>% 
-    ggplot(aes(x = mgiSymbol, y = -log10(adj.P.Val))) +
+geneLevels <- sigGeneDat %>% 
+    group_by(geneID_symbol) %>% 
+    summarise(score = n(), meanPval = mean(adj.P.Val)) %>% 
+    arrange(desc(score), meanPval) %>% 
+    select(geneID_symbol) %>% 
+    unlist()
+
+sigGeneDat <- sigGeneDat %>% 
+    mutate(geneID_symbol = factor(geneID_symbol, levels = geneLevels))
+
+sigGeneDat %>% 
+    ggplot(aes(x = geneID_symbol, y = -log10(adj.P.Val))) +
     geom_bar(aes(fill = design), stat = "identity",
                alpha = 0.8, colour = "white") +
-    coord_flip() +
     theme_classic() +
     scale_color_colorblind() + 
-    scale_fill_colorblind()
+    scale_fill_colorblind() +
+    theme(axis.text.x = element_text(angle = -90, hjust = 0, size = 6),
+          legend.position = "top")
 ```
-
-
-
-
 
 ----- 
 
-### Long-term HSC mice only
+# Examining HSC populations separately
+
+Just to check, I also tested for differential expression with only libraries
+from the same HSC population included. For both long- and short-term HSCs,
+there were no significant genes for `koStatus`.
+
+## Long-term HSC mice only
 
 ```{r build_dge_list_long}
 # Get data for libraries from long-term HSC population
@@ -887,67 +919,16 @@ dgeLongGeneDat <- dgeLongGeneDat %>%
 dgeLong$genes <- dgeLongGeneDat
 ```
 
-\  
-
-##### Principal component analysis (PCA)
-
-```{r pca_long, echo=FALSE}
-# Compute principal components
-pcaLong <- prcomp(t(dgeLong$counts))
-
-# Plot first two PCs and color by group
-autoplot(pcaLong, data = groupDatLong, colour = 'group', label.size = 3, 
-         shape = FALSE) +
-    scale_color_colorblind() +
-    guides(size = FALSE)
-
-# Plot the percentage of std dev explained by each PC
-data_frame(pc = 1:length(pcaLong$sdev), 
-           percSdev = pcaLong$sdev / sum(pcaLong$sdev)) %>% 
-    ggplot(aes(x = pc, y = percSdev)) +
-    geom_bar(stat = "identity", alpha = 0.8) +
-    theme_classic() +
-    scale_fill_colorblind()
-```
-
-Looking just at the long-term HSC populations, WT and BCAP knockout mice seem
-to cluster separately. When short-term populations are included, there is less
-distinction between knockout groups.
-
-\  
-
-##### Possible sources of confounding
-
-***Experimental, sequencing, and alignment variables plotted against the 1st
-principal component***
-
-```{r plot_pc1_long, echo=FALSE, fig.height=8}
+```{r plot_pc1_long, echo=FALSE}
 # Build data frame including design, metric, and other experimental variables
 confoundDatLong <- designDat %>% 
     filter(lib_id %in% groupDatLong$libID) %>% 
     select(libID = lib_id, sort_date, age_in_weeks, ng_per_ul) %>% 
     left_join(metricSummary, by = c("libID" = "libID")) %>% 
     bind_cols(groupDatLong %>% select(-libID))
-
-# Include PC1 values with data frame of (potentially) confounding variables
-pc1DatLong <- bind_cols(confoundDatLong, melt(pcaLong$x[, 1], value.name = "pc1"))
-
-# Plot PC1 against all other variables
-pc1DatLong %>% 
-    melt(measure.vars = setdiff(names(confoundDatLong), "libID")) %>%
-    ggplot(aes(x = value, y = pc1)) +
-    geom_point() +
-    facet_wrap(~ variable, nrow = 2, scales = "free_x") +
-    stat_smooth(aes(group = 1)) +
-    theme_classic() +
-    theme(axis.text.x = element_text(angle = 90),
-          panel.grid.major = element_line(colour = "grey", linetype = 3)) +
-    scale_colour_colorblind()
 ```
 
 \  
-
-#### Differential expression models
 
 ***Design:*** expression ~ `koStatus`
 
@@ -964,15 +945,15 @@ koVoomLong <- voomWithQualityWeights(dgeLong, design = koDesignLong,
 koFitLong <- lmFit(koVoomLong, koDesignLong)
 koFitLong <- eBayes(koFitLong)
 koResultsLong <- topTable(koFitLong, number = nrow(dgeLong))
-koResultsLong %>% 
-    filter(mgiSymbol == "Pik3ap1")
-
-koResultsLong %>% head()
 ```
+
+This  model produces 
+`r nrow(koResultsLong %>% filter(adj.P.Val < 0.05))` 
+significant genes for `koStatus`.
 
 \  
 
-### Short-term HSC mice only
+## Short-term HSC mice only
 
 ```{r build_dge_list_short}
 # Get data for libraries from long-term HSC population
@@ -1003,67 +984,16 @@ dgeShortGeneDat <- dgeShortGeneDat %>%
 dgeShort$genes <- dgeShortGeneDat
 ```
 
-\  
-
-##### Principal component analysis (PCA)
-
-```{r pca_short, echo=FALSE}
-# Compute principal components
-pcaShort <- prcomp(t(dgeShort$counts))
-
-# Plot first two PCs and color by group
-autoplot(pcaShort, data = groupDatShort, colour = 'group', label.size = 3, 
-         shape = FALSE) +
-    scale_color_colorblind() +
-    guides(size = FALSE)
-
-# Plot the percentage of std dev explained by each PC
-data_frame(pc = 1:length(pcaShort$sdev), 
-           percSdev = pcaShort$sdev / sum(pcaShort$sdev)) %>% 
-    ggplot(aes(x = pc, y = percSdev)) +
-    geom_bar(stat = "identity", alpha = 0.8) +
-    theme_classic() +
-    scale_fill_colorblind()
-```
-
-Looking just at the long-term HSC populations, WT and BCAP knockout mice seem
-to cluster separately. When short-term populations are included, there is less
-distinction between knockout groups.
-
-\  
-
-##### Possible sources of confounding
-
-***Experimental, sequencing, and alignment variables plotted against the 1st
-principal component***
-
-```{r plot_pc1_short, echo=FALSE, fig.height=8}
+```{r plot_pc1_short, echo=FALSE}
 # Build data frame including design, metric, and other experimental variables
 confoundDatShort <- designDat %>% 
     filter(lib_id %in% groupDatShort$libID) %>% 
     select(libID = lib_id, sort_date, age_in_weeks, ng_per_ul) %>% 
     left_join(metricSummary, by = c("libID" = "libID")) %>% 
     bind_cols(groupDatShort %>% select(-libID))
-
-# Include PC1 values with data frame of (potentially) confounding variables
-pc1DatShort <- bind_cols(confoundDatShort, melt(pcaShort$x[, 1], value.name = "pc1"))
-
-# Plot PC1 against all other variables
-pc1DatShort %>% 
-    melt(measure.vars = setdiff(names(confoundDatShort), "libID")) %>%
-    ggplot(aes(x = value, y = pc1)) +
-    geom_point() +
-    facet_wrap(~ variable, nrow = 2, scales = "free_x") +
-    stat_smooth(aes(group = 1)) +
-    theme_classic() +
-    theme(axis.text.x = element_text(angle = 90),
-          panel.grid.major = element_line(colour = "grey", linetype = 3)) +
-    scale_colour_colorblind()
 ```
 
 \  
-
-#### Differential expression models
 
 ***Design:*** expression ~ `koStatus`
 
@@ -1080,65 +1010,17 @@ koVoomShort <- voomWithQualityWeights(dgeShort, design = koDesignShort,
 koFitShort <- lmFit(koVoomShort, koDesignShort)
 koFitShort <- eBayes(koFitShort)
 koResultsShort <- topTable(koFitShort, number = nrow(dgeShort))
-koResultsShort %>% 
-    filter(mgiSymbol == "Pik3ap1")
-
-koResultsShort %>% head()
 ```
 
-\  
+This  model produces 
+`r nrow(koResultsShort %>% filter(adj.P.Val < 0.05))` 
+significant genes for `koStatus`.
 
-##### Looking at BCAP counts again...
+----- 
 
-```{r plot_bcap_fits, echo=FALSE, fig.height=4.5}
-# Pull out raw counts for BCAP gene (Pik3ap1)
-bcapIdx <- which(koVoom$genes$mgiSymbol == "Pik3ap1")
-bcapHscIdx <- which(koHscVoom$genes$mgiSymbol == "Pik3ap1")
-bcapIdxLong <- which(koVoomLong$genes$mgiSymbol == "Pik3ap1")
-bcapIdxShort <- which(koVoomShort$genes$mgiSymbol == "Pik3ap1")
+# Session info
 
-bcapDatAll <- koVoom$E[bcapIdx, ] %>% 
-    melt(value.name = "logCPM") %>% 
-    add_rownames(var = "libID") %>% 
-    mutate(koStatus = groupDat$koStatus,
-           hscPop = groupDat$hscPop,
-           samples = "all",
-           fit = fitted(koFit)[bcapIdx, ]) %>% 
-    bind_rows(koHscVoom$E[bcapHscIdx, ] %>% 
-                  melt(value.name = "logCPM") %>% 
-                  add_rownames(var = "libID") %>% 
-                  mutate(koStatus = groupDat$koStatus,
-                         hscPop = groupDat$hscPop,
-                         samples = "all_plusHsc",
-                         fit = fitted(koHscFit)[bcapHscIdx, ])) %>% 
-    bind_rows(koVoomShort$E[bcapIdxShort, ] %>% 
-                  melt(value.name = "logCPM") %>% 
-                  add_rownames(var = "libID") %>% 
-                  mutate(koStatus = groupDatShort$koStatus,
-                         hscPop = groupDatShort$hscPop,
-                         samples = "short",
-                         fit = fitted(koFitShort)[bcapIdxShort, ])) %>% 
-    bind_rows(koVoomLong$E[bcapIdxLong, ] %>% 
-                  melt(value.name = "logCPM") %>% 
-                  add_rownames(var = "libID") %>% 
-                  mutate(koStatus = groupDatLong$koStatus,
-                         hscPop = groupDatLong$hscPop,
-                         samples = "long",
-                         fit = fitted(koFitLong)[bcapIdxLong, ]))
-
-# Plot BCAP counts by KO status and facet by HSC population
-bcapDatAll %>% 
-    ggplot(aes(x = koStatus, y = logCPM)) +
-    geom_point(aes(fill = koStatus, shape = hscPop),
-                size = 3, alpha = 0.8, colour = "slategray") +
-    geom_text(aes(label = libID),
-                  hjust = -0.2, vjust = 1.2, size = 3) +
-    geom_errorbar(stat = "hline", yintercept = "mean",
-                  width = 0.8, aes(ymin = fit, ymax = fit)) +
-    facet_wrap(~ samples) +
-    theme_classic() +
-    scale_color_colorblind() + 
-    scale_fill_colorblind() +
-    scale_shape_manual(values = c(21, 22))
+```{r session_info}
+sessionInfo()
 ```
 
