@@ -22,7 +22,17 @@ options(scipen = 1, digits = 2)
 
 # Summary
 
+The goal of this analysis was to investigate differential expression in mice
+long- and short-term hematopoietic stem cells (HSCs) with and without knockout
+of **BCAP**. Raw RNA-seq data was previously processsed and aligned to the
+**GRCm37/mm9** reference genome with **`bowtie`** and **`TopHat`**. Read counts
+were generated using **`htseq-count`**.
 
+When controlling for HSC population (`hscPop`: long- vs. short-term) and RNA 
+concentration (`ng_per_ul`) variables, 132 genes were found to be significantly
+differentially expressed between knockout groups (`koStatus`: WT vs. BCAP KO).
+
+----- 
 
 # R environment set-up
 
