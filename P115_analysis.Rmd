@@ -20,6 +20,10 @@ knitr::opts_chunk$set(fig.width=8, fig.height=4, fig.align='center',
 options(scipen = 1, digits = 2)
 ```
 
+# Summary
+
+
+
 # R environment set-up
 
 ## Loading packages
