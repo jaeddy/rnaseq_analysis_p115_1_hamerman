@@ -14,3 +14,7 @@ readxl
 reshape2
 knitr
 shiny
+nlme
+mgcv
+genefilter
+sva

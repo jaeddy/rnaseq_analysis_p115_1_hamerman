@@ -15,7 +15,7 @@ ko_voom_weights	koDesign	koVoom
 plot_bcap_voom	bcapDat
 ko_fit_model	koFit	koResults
 exclude_lib7418	bcapDat	dge2	dgeGeneDat2	ens2Gene	koDesign2	mart
-unnamed-chunk-1	bcapDat	koVoom2
+unnamed-chunk-1	koHscDesign	koHscVoom	koSva
 ko_fit_model_noLib7418	koFit2	koResults2
 ko_voom_weights_noLib7418	koVoom2
 ko_hsc_voom_weights	koHscDesign	koHscVoom
@@ -40,3 +40,7 @@ plot_pc1_short	confoundDatShort	pc1DatShort
 plot_bcap_short	bcapDatShort
 ko_voom_weights_short	koDesignShort	koVoomShort
 ko_fit_model_short	koFitShort	koResultsShort
+plot_bcap_fits	bcapDatAll	bcapHscIdx	bcapIdx	bcapIdxLong	bcapIdxShort
+dge_cpm_dists	
+plot_dim1	confoundDat	dimDat
+plot_pc2	confoundDat	pc2Dat

@@ -56,10 +56,10 @@ plot_metric <- function(df, metric, yRange, xRange) {
         ggplot(aes(x, y)) +
         geom_hline(yintercept = yOutLims, linetype = 3) +
         geom_hline(yintercept = yRange, linetype = 1, colour = "red3", 
-                   size = 2) +
+                   size = 1) +
         geom_vline(xintercept = xOutLims, linetype = 3) +
         geom_vline(xintercept = xRange, linetype = 1, colour = "red3", 
-                   size = 2) +
+                   size = 1) +
         geom_point(aes(fill = yPassFail, alpha = xPassFail), 
                    shape = 21, size = 3, colour = "white") +
         geom_text(aes(label = label),
