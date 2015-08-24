@@ -29,8 +29,9 @@ of **BCAP**. Raw RNA-seq data was previously processsed and aligned to the
 were generated using **`htseq-count`**.
 
 When controlling for HSC population (`hscPop`: long- vs. short-term) and RNA 
-concentration (`ng_per_ul`) variables, 132 genes were found to be significantly
-differentially expressed between knockout groups (`koStatus`: WT vs. BCAP KO).
+concentration (`ng_per_ul`) variables, 274 genes were found to be significantly
+differentially expressed between knockout groups (`koStatus`: WT vs. BCAP KO);
+57 of these genes showed > 2 absolute fold-change difference between groups.
 
 ----- 
 
@@ -343,13 +344,13 @@ I used the function defined above to build the `DGEList` object for the data,
 which is the input for downstream functions.
 
 ```{r build_dge_list}
-# Filter genes with (cpm > 10) in < 10% of samples
+# Filter genes with (cpm > 10) in < 20% of samples
 dge = setUpDGEList(countData = countDat, geneData = geneDat,
                       filterCount = 10, 
                       filterPercentage = 0.20)
 ```
 
-Keeping only those genes with >= 10 counts per million in at least 20% (
+Keeping only those genes with $\geq$ 10 counts per million in at least 20% (
 `r 0.2 * nrow(groupDat)` samples), we're left with `r nrow(dge)` genes.
 
 ```{r dge_count_dists, echo=FALSE, fig.height=3.5}
@@ -437,8 +438,8 @@ normFactorTest %>%
     scale_fill_colorblind()
 ```
 
-For the not-too-stringent threshold used to filter genes (CPM > 10 in 20% of
-samples), the order of operations for calculating `norm.factors` appears to
+For the not-too-stringent threshold used to filter genes (CPM $\geq$ 10 in 20% 
+of samples), the order of operations for calculating `norm.factors` appears to
 have minimal impact on effective library sizes.
 
 \  
@@ -495,7 +496,7 @@ data_frame(pc = 1:length(pca$sdev),
 ```
 
 The second principal component (PC2) appears to explain the difference between
-long- and short-term HSC populations -- this is clearly a strong singal in the
+long- and short-term HSC populations---this is clearly a strong singal in the
 complete dataset. PC1, on the other hand, is not obviously correlated with any
 experimental group or any of the metrics I examined above.
 
@@ -780,7 +781,7 @@ model.
 # expression values
 koHscConcDesign <- model.matrix(~ koStatus + hscPop + ng_per_ul, 
                                 data = confoundDat)
-koHscConcVoom <- voomWithQualityWeights(dge, design = koHscDesign,
+koHscConcVoom <- voomWithQualityWeights(dge, design = koHscConcDesign,
                                     plot = TRUE)
 ```
 
@@ -796,13 +797,20 @@ koHscConcResults <- topTable(koHscConcFit, coef = 2, number = nrow(dge))
 ```
 
 This new model produces `r nrow(koHscConcResults %>% filter(adj.P.Val < 0.05))` 
-significant genes for `koStatus`:
-`r kable(koHscConcResults %>% filter(adj.P.Val < 0.05), digits = 3, format = "html")`
+significant genes for `koStatus` (too many to print here). Among these genes,
+`r nrow(koHscConcResults %>% filter((adj.P.Val < 0.05) & (abs(logFC) > 1)))`
+showed greater than 2 fold change (`logFC` > 1) difference in expression 
+between KO and WT:
+`r kable(koHscConcResults %>% filter((adj.P.Val < 0.05) & (abs(logFC) > 1)), digits = 3, format = "html")`
 
 \  
 
-**Pik3ap1** is still not significant after multiple testing correction:
+**Pik3ap1** is significant after multiple testing correction:
 `kable(koHscConcResults %>% filter(mgiSymbol == "Pik3ap1"), digits = 3, format = "html")`
+
+While, for the reasons stated above, differential BCAP expression should 
+probably not be viewed as a positive control, it's at least somewhat 
+encouraging to see the model better account for this difference.
 
 \  
 
@@ -810,15 +818,15 @@ significant genes for `koStatus`:
 weighting of samples
 
 Because I've accounted for the most obvious source of the variance explained by
-PC1 - and because `ng_per_ul` also appears to be correlated with the sample
-quality weights from `voom` - I opted to train an additional model without the
+PC1---and because `ng_per_ul` also appears to be correlated with the sample
+quality weights from `voom`---I opted to train an additional model without the
 quality weighting.
 
 ```{r ko_hsc_conc_voom_weights_noqual}
 # Define the design matrix, including terms corresponding to KO status, HSC
 # population, and RNA concentration; use voom to calculate transformed 
 # expression values
-koHscConcVoomNoQual <- voom(dge, design = koHscDesign, plot = TRUE)
+koHscConcVoomNoQual <- voom(dge, design = koHscConcDesign, plot = TRUE)
 ```
 
 ```{r ko_hsc_conc_fit_mode_noqual}
@@ -830,17 +838,17 @@ koHscConcNoQualResults <- topTable(koHscConcNoQualFit, coef = 2, number = nrow(d
 
 This new model produces 
 `r nrow(koHscConcNoQualResults %>% filter(adj.P.Val < 0.05))` 
-significant genes for `koStatus`:
-`r kable(koHscConcNoQualResults %>% filter(adj.P.Val < 0.05), digits = 3, format = "html")`
+significant genes for `koStatus`.
 
 \  
 
-**Pik3ap1** is borderline significant after multiple testing correction:
-`r kable(koHscConcNoQualResults %>% filter(mgiSymbol == "Pik3ap1"), digits = 3, format = "html")`
+The decrease in significant genes seems to suggest that there is enough 
+difference in library quality (or possibly some other source of noise)---even 
+when accounting for `ng_per_ul`---that not using `voom`'s quality weighting 
+leads to a worse model.
 
-While, for the reasons stated above, differential BCAP expression should 
-probably not be viewed as a positive control, it's at least somewhat 
-encouraging to see the model better account for this difference.
+**Pik3ap1** is again significant after multiple testing correction:
+`r kable(koHscConcNoQualResults %>% filter(mgiSymbol == "Pik3ap1"), digits = 3, format = "html")`
 
 \  
 
@@ -849,15 +857,16 @@ encouraging to see the model better account for this difference.
 The plot below shows the full list of genes that were found to be significant
 with one or more of the above model designs. For each gene, a colored bar
 indicates the design under which it was found to be significant (the size of
-the bar is scaled by the adjusted p-value).
+the bar is scaled by the adjusted p-value). *Note:* the plot is intended to
+display overlap between the model results, so gene labels are not shown.
 
 The gene lists for designs 1 and 2 overlap completely with designs 3 and 3.5;
-there were 4 genes from design 3 that were not significant in design 3.5.
+there were 5 genes from design 3.5 that were not significant in design 3.
 
 ***Genes with significantly different expression (adj. p-value < 0.05) as a
 function of BCAP KO status:***
 
-```{r compare_models, echo=FALSE, fig.width=9.5, fig.height=5}
+```{r compare_models, echo=FALSE, fig.height=5}
 sigGeneDat <- koResults %>% 
     filter(adj.P.Val < 0.05) %>% 
     mutate(design = "design1") %>% 
@@ -887,12 +896,42 @@ sigGeneDat %>%
     ggplot(aes(x = geneID_symbol, y = -log10(adj.P.Val))) +
     geom_bar(aes(fill = design), stat = "identity",
                alpha = 0.8, colour = "white") +
+    xlab("gene") +
     theme_classic() +
     scale_color_colorblind() + 
     scale_fill_colorblind() +
-    theme(axis.text.x = element_text(angle = -90, hjust = 0, size = 6),
+    scale_y_discrete(expand = c(0., 0)) +
+    theme(axis.ticks.x = element_blank(), axis.text.x = element_blank(),
           legend.position = "top")
 ```
+
+\  
+
+Below is a volcano plot for the **Design 3** model results. Yellow markers
+denote genes with adjusted p-value < 0.05; faded markers between the vertical
+dashed lines represent genes with fold change $\leq$ 2 (`logFC` $\leq$ 1).
+
+```{r volcano_plot, echo=FALSE, fig.height=5}
+# Add threshold indicators
+geneList <- koHscConcResults %>% 
+    mutate(isSig = adj.P.Val < 0.05,
+           aboveCutoff = abs(logFC) > 1)
+
+# Create volcano plot
+geneList %>% 
+    ggplot(aes(x = logFC, y = -log10(adj.P.Val))) +
+    geom_point(aes(fill = isSig, alpha = aboveCutoff), 
+               shape = 21, colour = "white",
+               size = 3) +
+    xlab("log2 fold change") + ylab("-log10 p-value") +
+    geom_hline(yintercept = -log10(0.05), size = 1, colour = "red3") + 
+    geom_vline(xintercept = c(-1, 1), size = 1, linetype = 3) +
+    scale_alpha_manual(values = c(0.3, 0.8)) +
+    theme_classic() +
+    theme(legend.position = "none") +
+    scale_fill_colorblind()
+```
+
 
 ----- 
 
@@ -910,7 +949,7 @@ groupDatLong <- groupDat %>%
     filter(hscPop == "long")
 countDatLong <- countDat[, names(countDat) %in% groupDatLong$libID]
 
-# Filter genes with (cpm > 10) in < 10% of samples
+# Filter genes with (cpm > 10) in < 20% of samples
 dgeLong = setUpDGEList(countData = countDatLong, geneData = geneDat,
                       filterCount = 10, 
                       filterPercentage = 0.20)
@@ -975,7 +1014,7 @@ groupDatShort <- groupDat %>%
     filter(hscPop == "short")
 countDatShort <- countDat[, names(countDat) %in% groupDatShort$libID]
 
-# Filter genes with (cpm > 10) in < 10% of samples
+# Filter genes with (cpm > 10) in < 20% of samples
 dgeShort = setUpDGEList(countData = countDatShort, geneData = geneDat,
                       filterCount = 10, 
                       filterPercentage = 0.20)
