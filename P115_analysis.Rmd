@@ -932,6 +932,11 @@ geneList %>%
     scale_fill_colorblind()
 ```
 
+```{r save_results}
+write.table(koHscConcResults, "data/p115_deg_ko_hsc_conc_results.txt",
+            quote = FALSE, row.names = FALSE, sep = "\t")
+```
+
 
 ----- 
 
